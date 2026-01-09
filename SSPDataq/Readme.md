@@ -1,6 +1,6 @@
 # SSPDataq code dump
 
-Copied from https://www.optecinc.com/downloads/legacy/sspdataq/
+Copied from https://www.optecinc.com/downloads/legacy/sspdataq/. This is for archive and development purposes only and I make no claim to copyright.
 
 ## SSPDataq
 
@@ -11,3 +11,5 @@ Release Date: 2025/09/12
 Documentation
 Name	Requirements	Download	
 SSPDataq3	Windows		
+
+1.0.0	2025/09/12	This is a copy of Jerry Persha's SSPDataq 3 and 4 software and source code. This is provided as an archive only.
