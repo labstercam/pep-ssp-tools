@@ -1,0 +1,30 @@
+0
+5
+M
+U
+B
+V
+R
+I
+Dark
+f21
+f22
+f23
+f24
+f25
+f26
+f31
+f32
+f33
+f34
+f35
+f36
+1
+0
+0
+0
+0
+0
+Enter Telescope
+Enter Observer
+1

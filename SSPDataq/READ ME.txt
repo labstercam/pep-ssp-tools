@@ -1,0 +1,5 @@
+You will need to buy a copy of Liberty Basic in order to compile and run these files. 
+
+Rename the runtime Liberty Basic executable "run451" to SSPDataqLauncher2 and use the icon editor to associated the SSP icon with the executable.
+
+To edit the help files, download HelpNDoc.
