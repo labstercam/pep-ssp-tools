@@ -166,7 +166,7 @@ class SSPDataAcquisitionWindow(Form):
         filter_label = Label()
         filter_label.Text = "Filter:"
         filter_label.Location = Point(x, y)
-        filter_label.Size = Size(50, 20)
+        filter_label.Size = Size(80, 20)
         self.Controls.Add(filter_label)
         
         self.filter_combo = ComboBox()
@@ -188,7 +188,7 @@ class SSPDataAcquisitionWindow(Form):
         gain_label = Label()
         gain_label.Text = "Gain:"
         gain_label.Location = Point(x, y)
-        gain_label.Size = Size(50, 20)
+        gain_label.Size = Size(70, 20)
         self.Controls.Add(gain_label)
         self.gain_combo = ComboBox()
         self.gain_combo.Location = Point(x, y + 20)
@@ -229,7 +229,7 @@ class SSPDataAcquisitionWindow(Form):
         interval_label = Label()
         interval_label.Text = "Interval:"
         interval_label.Location = Point(x, y)
-        interval_label.Size = Size(60, 20)
+        interval_label.Size = Size(70, 20)
         self.Controls.Add(interval_label)
         self.interval_combo = ComboBox()
         self.interval_combo.Location = Point(x, y + 20)
@@ -252,7 +252,7 @@ class SSPDataAcquisitionWindow(Form):
         mode_label = Label()
         mode_label.Text = "Count:"
         mode_label.Location = Point(x, y)
-        mode_label.Size = Size(60, 20)
+        mode_label.Size = Size(80, 20)
         self.Controls.Add(mode_label)
         
         self.mode_combo = ComboBox()
@@ -299,7 +299,7 @@ class SSPDataAcquisitionWindow(Form):
         object_label = Label()
         object_label.Text = "Object:"
         object_label.Location = Point(x, y)
-        object_label.Size = Size(60, 20)
+        object_label.Size = Size(150, 20)
         self.Controls.Add(object_label)
         self.object_combo = ComboBox()
         self.object_combo.Location = Point(x, y + 20)
@@ -318,7 +318,7 @@ class SSPDataAcquisitionWindow(Form):
         catalog_label = Label()
         catalog_label.Text = "Catalog:"
         catalog_label.Location = Point(x, y)
-        catalog_label.Size = Size(60, 20)
+        catalog_label.Size = Size(100, 20)
         self.Controls.Add(catalog_label)
         
         self.catalog_combo = ComboBox()
@@ -352,7 +352,7 @@ class SSPDataAcquisitionWindow(Form):
         status_label = Label()
         status_label.Text = "Status:"
         status_label.Location = Point(x, y)
-        status_label.Size = Size(60, 20)
+        status_label.Size = Size(820, 20)
         self.Controls.Add(status_label)
         self.status_text = TextBox()
         self.status_text.Location = Point(x, y + 20)
@@ -366,7 +366,7 @@ class SSPDataAcquisitionWindow(Form):
         data_label = Label()
         data_label.Text = "Data:"
         data_label.Location = Point(x, y)
-        data_label.Size = Size(60, 20)
+        data_label.Size = Size(1060, 20)
         self.Controls.Add(data_label)
         
         # Fixed column header (doesn't scroll)

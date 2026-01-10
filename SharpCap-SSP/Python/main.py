@@ -235,6 +235,9 @@ For more information, see the SSPDataq Software Overview document in:
             
             import ssp_dataaq
             ssp_dataaq.show_data_acquisition_window()
+            
+            # Minimize the launcher window
+            self.WindowState = FormWindowState.Minimized
         except Exception as e:
             import traceback
             error_detail = traceback.format_exc()
