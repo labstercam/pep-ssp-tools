@@ -5,6 +5,11 @@ Prototype development at the moment. Use entirely at your own risk. Please conta
 
 The SSP series Photometers by Optec have long since gone out of production but are still in use as they are one of the few ways to do high accuracy photometry of very bright stars. The data collection software is still available but is no longer actively supported. This repository is my attempt to port or redevelop the software to run using IronPython in SharpCap. If successful, it will enable a much more efficient data collection workflow with full telescope and guide camera control, and the possibility of connecting slider and flip mirror actuators using standard SharpCap functionality. It will also bring the development into a modern Python language, which can be run in SharpCap or the open source IronPython console, and should be easy to maintain and distribute.
 
+## SharpCap-SSP
+Working prototype of SSP data collection software using SharpCap. Does data collection and data export closely following SSPDataq 
+
+https://github.com/labstercam/pep-ssp-tools/tree/main/SharpCap-SSP
+
 ## Optec SSPDataq 3 and 4
 The legacy software from Optec.  https://www.optecinc.com/downloads/legacy/sspdataq/ Uses LibertyBasic
 
