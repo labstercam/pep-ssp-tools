@@ -1,0 +1,1 @@
+System.IO.Ports>=7.0.0

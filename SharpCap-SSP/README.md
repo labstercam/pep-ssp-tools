@@ -49,17 +49,118 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 
 ## Requirements
 
-- SharpCap Pro (for IronPython scripting support)
+### Core Requirements
 - Optec SSP-3a or SSP-5a photometer
 - Windows operating system
 - Serial (COM) port connection to photometer
 
+### Software Options (Choose One)
+
+**Option 1: SharpCap Pro (Recommended for astronomy workflows)**
+- Best for: Users who already use SharpCap for astronomical imaging
+- Pros: Zero setup, all dependencies included, integrated with imaging workflow
+- Cons: Requires SharpCap Pro license
+
+**Option 2: Standalone IronPython (Recommended for general use)**
+- Best for: Standalone photometry without SharpCap
+- Pros: Free, lightweight, works independently
+- Cons: Requires one-time setup (5 minutes)
+
+---
+
 ## Installation
 
+### Option 1: Run in SharpCap
+
+**Prerequisites:** SharpCap Pro installed
+
+**Steps:**
 1. Copy the SharpCap-SSP folder to your SharpCap scripts directory
 2. Launch SharpCap
-3. Open the Python Scripts panel
-4. Run `main.py` from the SharpCap-SSP/Python folder
+3. Go to **Tools → Scripting Console**
+4. Run:
+   ```python
+   exec(open(r'C:\path\to\SharpCap-SSP\Python\main.py').read())
+   ```
+
+Done! All dependencies are already included in SharpCap.
+
+---
+
+### Option 2: Standalone IronPython (Detailed Instructions)
+
+**Step 1: Install IronPython 3.4**
+
+1. Download IronPython 3.4 from: https://github.com/IronLanguages/ironpython3/releases
+   - Get the `.msi` installer (e.g., `IronPython.3.4.1.msi`)
+2. Run the installer
+3. Verify installation:
+   ```powershell
+   ipy --version
+   ```
+   Should show: `IronPython 3.4.x`
+
+**Step 2: Install System.IO.Ports (Serial Communication)**
+
+**Method A: Automatic Installation (Recommended)**
+
+1. Open PowerShell
+2. Navigate to the Python folder:
+   ```powershell
+   cd C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python
+   ```
+3. Run the installation script:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File install.ps1
+   ```
+4. Wait for "Installation successful!" message
+
+**Method B: Manual Installation (If PowerShell script fails)**
+
+1. Download System.IO.Ports:
+   - Go to: https://www.nuget.org/packages/System.IO.Ports/
+   - Click **"Download package"** button (right side)
+   - Save the `.nupkg` file
+
+2. Extract the DLL:
+   ```powershell
+   # Rename to .zip
+   Rename-Item System.IO.Ports.*.nupkg System.IO.Ports.zip
+   
+   # Extract
+   Expand-Archive System.IO.Ports.zip -DestinationPath extracted
+   
+   # Copy the DLL
+   copy extracted\lib\net6.0\System.IO.Ports.dll C:\path\to\SharpCap-SSP\Python\
+   ```
+
+**Step 3: Run the Application**
+
+1. Open IronPython:
+   ```powershell
+   ipy
+   ```
+
+2. Run main.py:
+   ```python
+   >>> exec(open('C:\\path\\to\\SharpCap-SSP\\Python\\main.py').read())
+   ```
+
+3. The application window should appear with COM ports available!
+
+**Troubleshooting:**
+- If you see "Serial ports not available", the DLL wasn't loaded correctly
+- Verify `System.IO.Ports.dll` exists in the Python folder
+- See [Python/SETUP.md](Python/SETUP.md) for detailed troubleshooting
+
+**Quick Launch (after setup):**
+Create a batch file `run.bat` in the Python folder:
+```batch
+@echo off
+ipy -c "exec(open('main.py').read())"
+pause
+```
+Double-click to launch!
 
 ## Quick Start
 

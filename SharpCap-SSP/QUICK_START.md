@@ -1,23 +1,61 @@
 # SharpCap-SSP Quick Start Guide
 
 ## Overview
-SharpCap-SSP provides SSP photometer control directly within SharpCap. This guide will get you collecting photometry data in 5 minutes.
-
----
-
-## Prerequisites
-- ✅ SharpCap 4.1 (64-bit) or later
-- ✅ SSP-3a or SSP-5a photometer
-- ✅ Serial cable connected to PC
-- ✅ Know your COM port number (check Windows Device Manager)
+SharpCap-SSP provides SSP photometer control for use with SharpCap or standalone. This guide will get you collecting photometry data in 5 minutes.
 
 ---
 
 ## Installation
-1. Copy the `SharpCap-SSP/Python/` folder to your SharpCap scripts directory
-2. Launch SharpCap
-3. Open the IronPython script console
-4. Run `main.py` to launch the control interface
+
+### Option 1: SharpCap (Zero Setup - Recommended for SharpCap users)
+
+**Prerequisites:**
+- ✅ SharpCap Pro installed
+- ✅ SSP-3a or SSP-5a photometer
+- ✅ Serial cable connected to PC
+
+**Steps:**
+1. Open SharpCap
+2. Go to **Tools → Scripting Console**
+3. Run:
+   ```python
+   exec(open(r'C:\\path\\to\\SharpCap-SSP\\Python\\main.py').read())
+   ```
+
+Done! All dependencies are included.
+
+---
+
+### Option 2: Standalone IronPython (Recommended for non-SharpCap users)
+
+**Prerequisites:**
+- ✅ SSP-3a or SSP-5a photometer
+- ✅ Serial cable connected to PC
+- ✅ Know your COM port number (check Windows Device Manager)
+
+**One-Time Setup:**
+1. Download and install IronPython 3.4: https://github.com/IronLanguages/ironpython3/releases
+2. Navigate to the Python folder:
+   ```powershell
+   cd C:\\path\\to\\SharpCap-SSP\\Python
+   ```
+3. Run the installer:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File install.ps1
+   ```
+4. Launch the application:
+   ```powershell
+   ipy -c \"exec(open('main.py').read())\"
+   ```
+
+**For detailed setup instructions, see [Python/SETUP.md](Python/SETUP.md)**
+
+---
+
+## Prerequisites (Check Device Manager)
+- ✅ SSP photometer connected
+- ✅ COM port visible in Windows Device Manager
+- ✅ Note your COM port number (e.g., COM3)
 
 ---
 

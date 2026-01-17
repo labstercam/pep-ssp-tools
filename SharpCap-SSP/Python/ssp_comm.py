@@ -11,7 +11,18 @@ Version: 0.1.0
 
 import clr
 clr.AddReference('System')
-from System.IO.Ports import SerialPort, Parity, StopBits
+
+# Try to import serial port functionality
+# In IronPython 3.4 (.NET Core/5+), System.IO.Ports is a separate package
+SERIAL_AVAILABLE = False
+try:
+    from System.IO.Ports import SerialPort, Parity, StopBits
+    SERIAL_AVAILABLE = True
+except ImportError:
+    SerialPort = None
+    Parity = None
+    StopBits = None
+
 from System.Threading import Thread
 from System import TimeSpan, DateTime, Array, Byte
 import time
@@ -42,6 +53,9 @@ class SSPCommunicator:
         Returns:
             tuple: (success: bool, message: str)
         """
+        if not SERIAL_AVAILABLE:
+            return (False, "Serial port functionality not available. Install System.IO.Ports package.")
+        
         if self.is_connected:
             return (False, "Already connected")
         

@@ -24,13 +24,42 @@ if script_dir not in sys.path:
 clr.AddReference('System')
 clr.AddReference('System.Windows.Forms')
 clr.AddReference('System.Drawing')
-clr.AddReference('System.IO.Ports')
+
+# Try to add System.IO.Ports - required for serial communication
+# In IronPython 3.4 (.NET Core/5+), this requires the System.IO.Ports NuGet package
+SERIAL_PORTS_AVAILABLE = False
+try:
+    # First try to load from GAC or standard locations
+    clr.AddReference('System.IO.Ports')
+    SERIAL_PORTS_AVAILABLE = True
+except:
+    # Try to load from local directory (if installed with install.ps1)
+    try:
+        import os
+        local_dll = os.path.join(script_dir, 'System.IO.Ports.dll')
+        if os.path.exists(local_dll):
+            clr.AddReferenceToFileAndPath(local_dll)
+            SERIAL_PORTS_AVAILABLE = True
+        else:
+            raise Exception("DLL not found")
+    except:
+        print("WARNING: System.IO.Ports not available.")
+        print("Run install.ps1 to download the required DLL.")
+        print("Or run from SharpCap which includes this assembly.")
+        print("Serial port functionality will not work.\n")
 
 # Import .NET namespaces
 from System import *
 from System.Windows.Forms import *
 from System.Drawing import *
-from System.IO.Ports import SerialPort, Parity, StopBits
+
+# Import serial port classes if available
+if SERIAL_PORTS_AVAILABLE:
+    from System.IO.Ports import SerialPort, Parity, StopBits
+else:
+    SerialPort = None
+    Parity = None
+    StopBits = None
 
 # Import SharpCap if available
 try:
@@ -161,13 +190,17 @@ For more information, see the SSPDataq Software Overview document in:
         status_group.Controls.Add(com_label)
         
         com_status = Label()
-        available_ports = SerialPort.GetPortNames()
-        if len(available_ports) > 0:
-            com_status.Text = "Available: " + ", ".join(available_ports)
-            com_status.ForeColor = Color.Green
+        if SERIAL_PORTS_AVAILABLE and SerialPort is not None:
+            available_ports = SerialPort.GetPortNames()
+            if len(available_ports) > 0:
+                com_status.Text = "Available: " + ", ".join(available_ports)
+                com_status.ForeColor = Color.Green
+            else:
+                com_status.Text = "No COM ports detected"
+                com_status.ForeColor = Color.Red
         else:
-            com_status.Text = "No COM ports detected"
-            com_status.ForeColor = Color.Red
+            com_status.Text = "Serial ports not available (missing System.IO.Ports)"
+            com_status.ForeColor = Color.Orange
         com_status.Location = Point(110, 50)
         com_status.Size = Size(430, 20)
         status_group.Controls.Add(com_status)
