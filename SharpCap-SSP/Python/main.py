@@ -61,15 +61,14 @@ else:
     Parity = None
     StopBits = None
 
-# Import SharpCap if available
-try:
-    import SharpCap
-    SHARPCAP_AVAILABLE = True
+# Check if SharpCap is available (it's provided as a global in SharpCap's scripting environment)
+# Don't import it - it's already there when running in SharpCap
+SHARPCAP_AVAILABLE = 'SharpCap' in dir()
+if SHARPCAP_AVAILABLE:
     SHARPCAP_VERSION = "Detected"
-except ImportError:
-    SHARPCAP_AVAILABLE = False
+else:
     SHARPCAP_VERSION = "N/A"
-    print("Warning: SharpCap module not available. Running in standalone mode.")
+    print("Warning: SharpCap not available. Running in standalone mode.")
 
 
 class SSPMainWindow(Form):
@@ -282,7 +281,7 @@ For more information, see the SSPDataq Software Overview document in:
         self.Close()
 
 
-def main():
+def launch_ssp_photometer():
     """Main entry point for SharpCap-SSP."""
     print("=" * 60)
     print("SharpCap-SSP Photometer Control v0.1.0")
@@ -300,11 +299,46 @@ def main():
     # Create and show the main window
     Application.EnableVisualStyles()
     window = SSPMainWindow()
-    Application.Run(window)
+    
+    # For SharpCap integration, use Show() to keep SharpCap responsive
+    # For standalone, use Application.Run() for standard event loop
+    if SHARPCAP_AVAILABLE:
+        window.Show()
+    else:
+        Application.Run(window)
     
     print("SharpCap-SSP closed.")
 
 
-# Entry point
-if __name__ == '__main__':
-    main()
+# SharpCap Integration: Add custom button to toolbar
+if SHARPCAP_AVAILABLE:
+    import os
+    from System.Drawing import Image
+    
+    # Prepare icon path for custom button
+    ssp_script_path = os.path.dirname(__file__) if '__file__' in dir() else os.getcwd()
+    icon_path = os.path.join(ssp_script_path, "SSP.ico")
+    
+    try:
+        # Add custom button to SharpCap UI (same as occultation-manager)
+        if os.path.exists(icon_path):
+            SharpCap.AddCustomButton("PEP", Image.FromFile(icon_path), "SSP Photometer Control", launch_ssp_photometer)
+            print("PEP custom button added to SharpCap toolbar with icon")
+        else:
+            print(f"Warning: Icon file not found at {icon_path}")
+            print("Adding button without icon...")
+            SharpCap.AddCustomButton("PEP", None, "SSP Photometer Control", launch_ssp_photometer)
+            print("PEP custom button added to SharpCap toolbar (no icon)")
+    except Exception as e:
+        import traceback
+        print(f"Error adding custom button to SharpCap:")
+        print(f"  {e}")
+        print("\nFull traceback:")
+        print(traceback.format_exc())
+        print("\nSharpCap-SSP can still be launched from the Scripting Console:")
+        print(f"  exec(open(r'{os.path.join(ssp_script_path, 'main.py')}').read())")
+
+# Standalone mode: Run directly when script is executed
+else:
+    if __name__ == '__main__':
+        launch_ssp_photometer()

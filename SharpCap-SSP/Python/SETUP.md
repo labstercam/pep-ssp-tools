@@ -16,22 +16,145 @@ Complete setup instructions for running SharpCap-SSP.
 
 ### Requirements
 - SharpCap Pro installed
+- Windows operating system
 
 ### Installation Steps
 
-**No installation needed!** SharpCap includes all required assemblies.
+**No additional packages needed!** SharpCap includes all required assemblies.
 
-### Running the Application
+---
+
+### Method 1: Automatic Startup (Recommended)
+
+Configure SharpCap to load the SSP control automatically and add a toolbar button.
+
+**Step 1: Copy the Python folder**
+
+1. Copy the entire `SharpCap-SSP\Python` folder to a permanent location
+2. Recommended location:
+   ```
+   C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python
+   ```
+3. The folder should contain:
+   - `main.py`
+   - `SSP.ico`
+   - `ssp_*.py` files
+   - All other Python modules
+
+**Step 2: Configure SharpCap Startup Script**
+
+1. **Open SharpCap Settings:**
+   - Launch SharpCap
+   - Go to **Tools → Settings** (or press `F10`)
+
+2. **Navigate to Scripting tab:**
+   - In the Settings window, click **"Scripting"** in the left sidebar
+
+3. **Set the startup script:**
+   - Find the **"Startup Script"** text field
+   - Enter the full path to main.py:
+     ```
+     C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python\main.py
+     ```
+   - Replace `YourName` with your actual Windows username
+   - **Important:** Use the full absolute path with backslashes or forward slashes
+
+4. **Save and close:**
+   - Click **OK** to save the settings
+   - Close the Settings window
+
+**Step 3: Restart SharpCap**
+
+1. Close SharpCap completely
+2. Reopen SharpCap
+3. Look for the **"PEP"** button with SSP icon in the toolbar
+   - The button displays the SSP photometer icon from `SSP.ico`
+   - Location: Main SharpCap toolbar (top of window)
+4. Click the PEP button to launch the SSP control window
+
+**Verification:**
+- The SharpCap console should show: `"PEP custom button added to SharpCap toolbar with icon"`
+- You should see the PEP button in the main toolbar with the SSP icon
+- Clicking it opens the SSP Photometer Control window
+
+**Note: Running Multiple Startup Scripts**
+
+To run both SharpCap-SSP and other scripts (e.g., occultation-manager) on startup:
+1. Create a file called `startup.py` in your scripts folder
+2. Add:
+   ```python
+   exec(open(r'C:\path\to\occultation-manager\main.py').read())
+   exec(open(r'C:\path\to\SharpCap-SSP\Python\main.py').read())
+   ```
+3. Set the startup script to point to `startup.py`
+
+Both toolbars buttons will appear without conflicts. The SSP script uses a unique function name (`launch_ssp_photometer()`) to avoid conflicts with other scripts.
+
+---
+
+### Method 2: Manual Launch (Alternative)
+
+Run the script manually each time you need it.
+
+**Steps:**
 
 1. Open SharpCap
 2. Go to **Tools → Scripting Console**
-3. Click **"Open Script"** or type:
+3. In the console, type or paste:
    ```python
-   exec(open(r'C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python\main.py').read())
+   exec(open(r'C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python\main.py').read())
    ```
 4. Press Enter
 
-The application window will appear, ready to use.
+The application window will appear immediately.
+
+**Note:** With this method, no toolbar button is added. You need to run the command each time.
+
+---
+
+### Using the Application
+
+Once launched (either method):
+
+1. **From the launcher window:**
+   - Click **"Launch SSPDataq3"** to open the data acquisition interface
+   - Or close the launcher and run the data acquisition directly next time
+
+2. **Configure COM port:**
+   - In the data acquisition window: **Setup → Select SSP COM Port**
+   - Choose your SSP photometer's COM port
+
+3. **Connect to photometer:**
+   - **Setup → Connect to SSP**
+   - Wait for connection confirmation
+
+4. **Start collecting data:**
+   - Select filter, gain, integration time
+   - Enter object name
+   - Click **START** to collect readings
+
+---
+
+### Troubleshooting
+
+**"PEP button doesn't appear":**
+- Check the SharpCap console for error messages
+- Verify the path in startup script is correct
+- Ensure `SSP.ico` exists in the Python folder
+- Try running manually to see any error messages
+
+**"Script path not found":**
+- Verify the full path is correct
+- Use raw strings: `r'C:\path\to\file'`
+- Or use forward slashes: `'C:/path/to/file'`
+
+**"Window appears behind SharpCap":**
+- This is normal - the window uses `.Show()` to stay non-modal
+- Click the PEP button again or find the window in the taskbar
+
+**"SSP.ico not found" warning:**
+- Button still works, just without icon
+- Verify `SSP.ico` is in the same folder as `main.py`
 
 ---
 

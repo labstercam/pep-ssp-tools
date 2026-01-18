@@ -19,6 +19,7 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 ## Features
 
 ### Implemented ✅
+- ✅ **SharpCap Integration**: Custom "PEP" toolbar button with icon
 - ✅ Serial COM port connection and management (19200,N,8,1)
 - ✅ Automatic COM port disconnect on program close
 - ✅ SSP photometer command protocol (SSSSSS, SEEEEE, SCnnnn, SGNNN)
@@ -74,14 +75,34 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 
 **Prerequisites:** SharpCap Pro installed
 
-**Steps:**
-1. Copy the SharpCap-SSP folder to your SharpCap scripts directory
-2. Launch SharpCap
-3. Go to **Tools → Scripting Console**
-4. Run:
-   ```python
-   exec(open(r'C:\path\to\SharpCap-SSP\Python\main.py').read())
-   ```
+**Installation Steps:**
+
+1. **Copy the files:**
+   - Copy the `SharpCap-SSP/Python` folder to a location of your choice
+   - Recommended: `Documents\SharpCap\Scripts\SharpCap-SSP\Python`
+
+2. **Configure SharpCap startup script:**
+   - In SharpCap, go to **Tools → Settings**
+   - Navigate to the **Scripting** tab
+   - In the **"Startup Script"** field, enter the full path:
+     ```
+     C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python\main.py
+     ```
+   - Replace `YourName` with your actual Windows username
+   - Click **OK** to save
+
+3. **Restart SharpCap:**
+   - Close and reopen SharpCap
+   - A **"PEP"** button with the SSP icon will appear in the SharpCap toolbar
+   - The button looks like: ![SSP Icon](Python/SSP.ico)
+   - Click the PEP button to launch the SSP control window
+
+**Alternative - Manual Launch (without startup script):**
+- Go to **Tools → Scripting Console**
+- Run:
+  ```python
+  exec(open(r'C:\path\to\SharpCap-SSP\Python\main.py').read())
+  ```
 
 Done! All dependencies are already included in SharpCap.
 

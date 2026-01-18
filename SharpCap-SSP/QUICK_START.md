@@ -14,13 +14,31 @@ SharpCap-SSP provides SSP photometer control for use with SharpCap or standalone
 - ✅ SSP-3a or SSP-5a photometer
 - ✅ Serial cable connected to PC
 
-**Steps:**
-1. Open SharpCap
-2. Go to **Tools → Scripting Console**
-3. Run:
-   ```python
-   exec(open(r'C:\\path\\to\\SharpCap-SSP\\Python\\main.py').read())
+**One-Time Setup:**
+1. Copy `SharpCap-SSP\Python` folder to:
    ```
+   C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python
+   ```
+
+2. In SharpCap, go to **Tools → Settings → Scripting**
+
+3. Set **Startup Script** to:
+   ```
+   C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python\main.py
+   ```
+
+4. Restart SharpCap - **"PEP"** button appears in toolbar
+   - Button displays the SSP photometer icon
+   - Located in the main SharpCap toolbar
+
+5. Click **PEP** to launch the SSP control window
+
+**Alternative - Manual Launch:**
+- Go to **Tools → Scripting Console**
+- Run:
+  ```python
+  exec(open(r'C:\path\to\SharpCap-SSP\Python\main.py').read())
+  ```
 
 Done! All dependencies are included.
 
