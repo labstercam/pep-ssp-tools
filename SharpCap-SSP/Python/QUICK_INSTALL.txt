@@ -1,0 +1,183 @@
+============================================================
+SharpCap-SSP Photometer Control - Quick Installation Guide
+============================================================
+
+Thank you for downloading SharpCap-SSP!
+
+This package provides control software for Optec SSP-3a and SSP-5a 
+photometers, with integration for SharpCap or standalone operation.
+
+============================================================
+CHOOSE YOUR INSTALLATION METHOD
+============================================================
+
+Option 1: SharpCap Integration (Recommended if you use SharpCap)
+Option 2: Standalone Mode (Works without SharpCap)
+
+============================================================
+OPTION 1: SHARPCAP INTEGRATION
+============================================================
+
+Prerequisites:
+- SharpCap Pro installed
+
+Installation Steps:
+
+1. EXTRACT THIS ZIP FILE
+   - Extract to: C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP
+   - Or any location of your choice
+
+2. CONFIGURE SHARPCAP STARTUP
+   - Open SharpCap
+   - Go to: Tools → Settings → Scripting
+   - In "Startup Script" field, enter the full path:
+     C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\main.py
+   - Click OK
+
+3. RESTART SHARPCAP
+   - Close and reopen SharpCap
+   - Look for the "PEP" button with SSP icon in the toolbar
+   - Click PEP to launch SSP control
+
+That's it! No additional installation needed.
+SharpCap includes all required dependencies.
+
+============================================================
+OPTION 2: STANDALONE MODE
+============================================================
+
+Prerequisites:
+- Windows 10 or 11
+- Administrator access for installation
+
+Installation Steps:
+
+1. INSTALL IRONPYTHON 3.4
+   - Download from: https://github.com/IronLanguages/ironpython3/releases
+   - Look for: IronPython.3.4.x.msi
+   - Run the installer
+   - Accept default settings
+
+2. INSTALL SYSTEM.IO.PORTS (Serial Communication)
+   - Right-click "install.ps1" and select "Run with PowerShell"
+   - Wait for "Installation successful!" message
+   - Press any key to close
+
+3. CREATE DESKTOP SHORTCUT (Optional but Recommended)
+   - Double-click "Create_Desktop_Shortcut.bat"
+   - A desktop icon "SSP Photometer" will be created
+
+4. LAUNCH THE APPLICATION
+   - Double-click the desktop shortcut
+   OR
+   - Double-click "Launch_SSP.bat"
+
+============================================================
+QUICK START - FIRST USE
+============================================================
+
+1. Connect your SSP photometer to your PC via serial cable
+
+2. Check COM port in Windows Device Manager:
+   - Press Win+X, select "Device Manager"
+   - Expand "Ports (COM & LPT)"
+   - Note the COM port number (e.g., COM3)
+
+3. Launch SharpCap-SSP (using either method above)
+
+4. In the launcher window:
+   - Click "Launch SSPDataq3" button
+
+5. Configure COM port:
+   - Go to: Setup → Select SSP COM Port
+   - Choose your COM port from the list
+   - Click OK
+
+6. Connect to photometer:
+   - Go to: Setup → Connect to SSP
+   - Wait for connection confirmation
+
+7. Start collecting data:
+   - Select filter (U, B, V, R, I, or Dark)
+   - Select gain (1, 10, or 100)
+   - Select integration time
+   - Enter object name
+   - Click START button
+
+============================================================
+TROUBLESHOOTING
+============================================================
+
+Problem: "IronPython not found" error
+Solution: Install IronPython 3.4 (see step 1 above)
+
+Problem: "System.IO.Ports not available" warning
+Solution: Run install.ps1 (see step 2 above)
+
+Problem: "No COM ports detected"
+Solution: 
+  - Check SSP photometer is connected
+  - Verify in Device Manager that COM port appears
+  - Install USB-to-Serial drivers if needed
+
+Problem: Desktop shortcut doesn't work
+Solution: 
+  - Right-click Launch_SSP.bat and select "Run"
+  - Check error message for specific issue
+
+Problem: Can't connect to SSP photometer
+Solution:
+  - Verify correct COM port selected
+  - Check serial cable is properly connected
+  - Try power cycling the SSP photometer
+
+============================================================
+FILE STRUCTURE
+============================================================
+
+SharpCap-SSP/
+├── main.py                          - Main application entry point
+├── ssp_dataaq.py                    - Data acquisition interface
+├── ssp_comm.py                      - Serial communication
+├── ssp_config.py                    - Configuration management
+├── ssp_dialogs.py                   - User dialogs
+├── night_mode.py                    - Red screen mode
+├── SSP.ico                          - Application icon
+├── install.ps1                      - Dependency installer
+├── Launch_SSP.bat                   - Quick launcher
+├── Create_Desktop_Shortcut.bat      - Shortcut creator
+├── QUICK_INSTALL.txt                - This file
+├── SETUP.md                         - Detailed setup guide
+├── README.md                        - Full documentation
+└── requirements.txt                 - Python dependencies
+
+============================================================
+DOCUMENTATION
+============================================================
+
+README.md        - Complete documentation and feature list
+SETUP.md         - Detailed installation and troubleshooting
+QUICK_START.md   - Quick reference guide
+
+Online: https://github.com/labstercam/pep-ssp-tools
+
+============================================================
+SUPPORT
+============================================================
+
+For issues, questions, or feature requests:
+- GitHub Issues: https://github.com/labstercam/pep-ssp-tools/issues
+
+============================================================
+VERSION INFORMATION
+============================================================
+
+SharpCap-SSP Version: 0.1.0
+Release Date: January 2026
+Project: pep-ssp-tools
+
+License: See LICENSE file in repository
+
+============================================================
+
+Enjoy using SharpCap-SSP for your photometry observations!

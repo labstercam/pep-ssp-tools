@@ -2,9 +2,21 @@
 
 SharpCap-SSP is a Python-based tool for integrating Optec SSP photometers with SharpCap astronomical imaging software.
 
+---
+
+## 📥 Quick Download
+
+**Latest Release: v0.1.0**
+
+### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.0.zip)
+
+*Non-experts: Just download the ZIP, extract it, and follow the `QUICK_INSTALL.txt` file inside.*
+
+---
+
 ## Overview
 
-This tool replicates the core data collection functionality of the original SSPDataq software, enabling serial communication and photometer control directly within the SharpCap environment.
+This tool replicates the core data collection functionality of the original SSPDataq software, enabling serial communication and photometer control directly within the SharpCap environment or standalone.
 
 ## Status: Version 0.1.0 - Fully Functional
 
