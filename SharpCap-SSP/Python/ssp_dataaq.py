@@ -11,6 +11,7 @@ Version: 0.1.0
 
 import clr
 import sys
+import time
 
 # Ensure module path is accessible
 import System
@@ -23,6 +24,11 @@ clr.AddReference('System.Windows.Forms')
 clr.AddReference('System.Drawing')
 clr.AddReference('Microsoft.VisualBasic')
 
+try:
+    from System.Threading import CancellationToken
+except ImportError:
+    CancellationToken = None  # Not available in standalone mode
+
 from System import *
 from System.Windows.Forms import *
 from System.Drawing import *
@@ -33,22 +39,50 @@ import ssp_config
 import ssp_comm
 import ssp_dialogs
 import night_mode
+import ssp_catalog
 
 
 class SSPDataAcquisitionWindow(Form):
     """Main data acquisition window."""
     
-    def __init__(self):
-        """Initialize the data acquisition window."""
-        # Load configuration
-        self.config = ssp_config.SSPConfig()
+    def __init__(self, sharpcap=None, coordinate_parser=None):
+        """Initialize the data acquisition window.
         
-        # Initialize communicator
+        Args:
+            sharpcap: SharpCap object if running in SharpCap, None if standalone
+            coordinate_parser: CoordinateParser class if running in SharpCap, None if standalone
+        """
+        Form.__init__(self)
+        
+        # Initialize SSP communication and configuration
         self.comm = ssp_comm.SSPCommunicator()
+        self.config = ssp_config.SSPConfig()
         
         # Initialize night mode
         self.night_mode = night_mode.NightMode()
         self.night_mode.set_night_mode(self.config.get('night_flag', 0) == 1)
+        
+        # Initialize star catalog
+        self.catalog = None
+        self._load_star_catalog()
+        
+        # Store SharpCap object and CoordinateParser (passed from main.py)
+        self.SharpCap = sharpcap
+        self.CoordinateParser = coordinate_parser
+        self.sharpcap_available = sharpcap is not None
+        
+        print("DEBUG: sharpcap_available = %s" % self.sharpcap_available)
+        if self.sharpcap_available:
+            print("DEBUG: Running in SharpCap mode - GOTO button will be created")
+        else:
+            print("DEBUG: Running in standalone mode - GOTO button will NOT be created")
+        
+        # Dictionary to map object combo display names to (actual_name, catalog_type)
+        # catalog_type: 'V' for variable, 'C' for comparison, 'K' for check
+        self.star_name_map = {}
+        
+        # Store currently selected target triple for GOTO functionality
+        self.current_target = None
         
         # Data arrays
         self.data_array = []
@@ -150,6 +184,19 @@ class SSPDataAcquisitionWindow(Form):
         setup_menu.DropDownItems.Add(show_setup_item)
         
         menu_strip.Items.Add(setup_menu)
+        
+        # Catalog Menu
+        catalog_menu = ToolStripMenuItem("Catalog")
+        
+        select_star_item = ToolStripMenuItem("Select Target Star")
+        select_star_item.Click += self._on_select_star
+        catalog_menu.DropDownItems.Add(select_star_item)
+        
+        reload_catalog_item = ToolStripMenuItem("Reload Catalog")
+        reload_catalog_item.Click += self._on_reload_catalog
+        catalog_menu.DropDownItems.Add(reload_catalog_item)
+        
+        menu_strip.Items.Add(catalog_menu)
         
         self.MainMenuStrip = menu_strip
         self.Controls.Add(menu_strip)
@@ -311,6 +358,7 @@ class SSPDataAcquisitionWindow(Form):
         self.object_combo.Items.Add("SKYLAST")
         self.object_combo.Items.Add("CATALOG")
         self.object_combo.SelectedIndex = 0
+        self.object_combo.SelectionChangeCommitted += self._on_object_changed
         self.Controls.Add(self.object_combo)
         
         x += 160
@@ -336,8 +384,20 @@ class SSPDataAcquisitionWindow(Form):
         self.catalog_combo.SelectedIndex = 0
         self.Controls.Add(self.catalog_combo)
         
+        # Current target label (shows selected var/comp/check)
+        x = 10
+        y = y + 50
+        self.current_target_label = Label()
+        self.current_target_label.Text = "No target selected - Use Catalog > Select Target Star"
+        self.current_target_label.Location = Point(x, y)
+        self.current_target_label.Size = Size(800, 20)
+        self.current_target_label.ForeColor = Color.Gray
+        self.current_target_label.Font = Font("Arial", 9, FontStyle.Italic)
+        self.Controls.Add(self.current_target_label)
+        
         # START button
         x = 300
+        y = y_offset + 80
         self.start_button = Button()
         self.start_button.Text = "START"
         self.start_button.Location = Point(x, y + 20)
@@ -390,6 +450,25 @@ class SSPDataAcquisitionWindow(Form):
         self.data_listbox_initial_width = 820
         self.data_listbox_initial_height = 65
         self.header_label_initial_width = 820
+        
+        # GOTO button (added last so it's on top of z-order, only in SharpCap mode)
+        if self.sharpcap_available:
+            # Position next to START button at same Y coordinate
+            start_y = self.start_button.Location.Y
+            start_x = self.start_button.Location.X + self.start_button.Size.Width + 10  # 10px gap
+            print("DEBUG: Creating GOTO button at position (%d, %d)" % (start_x, start_y))
+            self.goto_button = Button()
+            self.goto_button.Text = "GOTO Selected Star"
+            self.goto_button.Location = Point(start_x, start_y)
+            self.goto_button.Size = Size(150, 30)  # Match START button height
+            self.goto_button.Enabled = False  # Disabled until target selected
+            self.goto_button.Click += self._on_goto_target
+            self.goto_button.BringToFront()  # Ensure it's on top
+            self.Controls.Add(self.goto_button)
+            print("DEBUG: GOTO button created and added to form")
+            print("DEBUG: Button visible=%s, enabled=%s" % (self.goto_button.Visible, self.goto_button.Enabled))
+        else:
+            print("DEBUG: Skipping GOTO button creation (not in SharpCap)")
     
     def _update_time_display(self, sender, event):
         """Update time display."""
@@ -815,6 +894,11 @@ class SSPDataAcquisitionWindow(Form):
         object_val = self.object_combo.Text
         catalog_val = self.catalog_combo.Text
         
+        # Get actual star name (without display suffixes) if in mapping
+        if object_val in self.star_name_map:
+            actual_name, catalog_type = self.star_name_map[object_val]
+            object_val = actual_name  # Use actual name without (Comp) or (Check)
+        
         # Get catalog code (first letter)
         catalog_code = catalog_val[0].upper() if len(catalog_val) > 0 else "?"
         
@@ -969,7 +1053,550 @@ class SSPDataAcquisitionWindow(Form):
         return line
 
 
-def show_data_acquisition_window():
-    """Show the data acquisition window."""
-    window = SSPDataAcquisitionWindow()
+    def _load_star_catalog(self):
+        """Load the star catalog from CSV file."""
+        import os
+        
+        # Get script directory - use module-level script_dir or fallback
+        # This works in both SharpCap (exec'd) and standalone (ipy main.py) modes
+        try:
+            catalog_dir = script_dir
+        except NameError:
+            # Fallback if script_dir somehow not defined
+            import System
+            catalog_dir = System.IO.Directory.GetCurrentDirectory()
+        
+        csv_path = os.path.join(catalog_dir, "starparm_latest.csv")
+        
+        if not os.path.exists(csv_path):
+            print("Warning: Star catalog not found at: " + csv_path)
+            self.catalog = None
+            return
+        
+        try:
+            self.catalog = ssp_catalog.StarCatalog(csv_path)
+            print("Star catalog loaded: %d targets" % self.catalog.get_count())
+        except Exception as e:
+            import traceback
+            print("Error loading star catalog: " + str(e))
+            print(traceback.format_exc())
+            self.catalog = None
+    
+    def _on_reload_catalog(self, sender, event):
+        """Handle reload catalog menu click."""
+        self._load_star_catalog()
+        if self.catalog:
+            MessageBox.Show("Catalog reloaded successfully.\n%d targets loaded." % self.catalog.get_count(),
+                          "Catalog Reloaded", MessageBoxButtons.OK, MessageBoxIcon.Information)
+        else:
+            MessageBox.Show("Failed to reload catalog.\nCheck that starparm_latest.csv is in the Python folder.",
+                          "Catalog Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+    
+    def _on_select_star(self, sender, event):
+        """Handle select star menu click."""
+        if not self.catalog or self.catalog.get_count() == 0:
+            MessageBox.Show("No star catalog loaded.\n\nPlace 'starparm_latest.csv' in the Python folder and use Catalog > Reload Catalog.",
+                          "No Catalog", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        
+        # Create star selection dialog
+        dialog = StarSelectionDialog(self.catalog)
+        result = dialog.ShowDialog(self)
+        
+        if result == DialogResult.OK and dialog.selected_target:
+            target = dialog.selected_target
+            
+            # Store the selected target for GOTO functionality
+            self.current_target = target
+            
+            # Enable GOTO button if in SharpCap mode
+            if self.sharpcap_available and hasattr(self, 'goto_button'):
+                print("DEBUG: Enabling GOTO button for target: %s" % target.variable.name)
+                self.goto_button.Enabled = True
+                print("DEBUG: GOTO button enabled=%s, visible=%s" % (self.goto_button.Enabled, self.goto_button.Visible))
+            elif self.sharpcap_available:
+                print("DEBUG: WARNING - sharpcap_available=True but goto_button attribute not found!")
+            else:
+                print("DEBUG: Not enabling GOTO button (not in SharpCap mode)")
+            
+            # Update the current target label
+            self.current_target_label.Text = "Current Target: Var=%s | Comp=%s | Check=%s" % (
+                target.variable.name,
+                target.comparison.name,
+                target.check.name)
+            self.current_target_label.ForeColor = Color.DarkGreen
+            self.current_target_label.Font = Font("Arial", 9, FontStyle.Bold)
+            
+            # Prepare display names and actual names
+            var_display = target.variable.name
+            var_actual = target.variable.name
+            comp_display = target.comparison.name + " (Comp)"
+            comp_actual = target.comparison.name
+            check_display = target.check.name + " (Check)"
+            check_actual = target.check.name
+            
+            # Store mapping: display_name -> (actual_name, catalog_type)
+            # catalog_type: 'V'=Var, 'C'=Comp, 'K'=Check
+            self.star_name_map[var_display] = (var_actual, 'V')
+            self.star_name_map[comp_display] = (comp_actual, 'C')
+            self.star_name_map[check_display] = (check_actual, 'K')
+            
+            # Helper function to add unique item
+            def add_unique_item(item_name):
+                for i in range(self.object_combo.Items.Count):
+                    if str(self.object_combo.Items[i]) == item_name:
+                        return i  # Already exists
+                self.object_combo.Items.Add(item_name)
+                return self.object_combo.Items.Count - 1
+            
+            # Add all three stars
+            var_index = add_unique_item(var_display)
+            comp_index = add_unique_item(comp_display)
+            check_index = add_unique_item(check_display)
+            
+            # Select the variable star by default
+            self.object_combo.SelectedIndex = var_index
+            
+            # Auto-set catalog to Var
+            self._set_catalog_for_object(var_display)
+            
+            self._update_status("Added target stars: %s, %s, %s - Variable selected" % (
+                var_display, comp_display, check_display))
+    
+    def _on_object_changed(self, sender, event):
+        """Handle object selection change - auto-set catalog type."""
+        selected = self.object_combo.Text
+        self._set_catalog_for_object(selected)
+    
+    def _set_catalog_for_object(self, object_name):
+        """Set catalog combobox based on selected object.
+        
+        Args:
+            object_name: The display name of the selected object
+        """
+        if object_name in self.star_name_map:
+            actual_name, catalog_type = self.star_name_map[object_name]
+            
+            # Map catalog type to catalog combo index
+            # catalog_type: 'V'=Var, 'C'=Comp, 'K'=Check
+            if catalog_type == 'V':
+                # Set to "Var"
+                for i in range(self.catalog_combo.Items.Count):
+                    if str(self.catalog_combo.Items[i]) == "Var":
+                        self.catalog_combo.SelectedIndex = i
+                        break
+            elif catalog_type == 'C':
+                # Set to "Comp"
+                for i in range(self.catalog_combo.Items.Count):
+                    if str(self.catalog_combo.Items[i]) == "Comp":
+                        self.catalog_combo.SelectedIndex = i
+                        break
+            elif catalog_type == 'K':
+                # Set to "Q'check"
+                for i in range(self.catalog_combo.Items.Count):
+                    if str(self.catalog_combo.Items[i]) == "Q'check":
+                        self.catalog_combo.SelectedIndex = i
+                        break
+    
+    def _on_goto_target(self, sender, event):
+        """Handle GOTO button click - slew telescope to selected star."""
+        if not self.sharpcap_available:
+            MessageBox.Show("GOTO is only available when running in SharpCap.",
+                          "Not Available", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            return
+        
+        if not self.current_target:
+            MessageBox.Show("No target selected. Use Catalog > Select Target Star first.",
+                          "No Target", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        
+        # Get the currently selected object to determine which star to GOTO
+        selected_obj = self.object_combo.Text
+        
+        # Determine which star (var, comp, or check) to slew to
+        star = None
+        star_type = "Target"
+        
+        if selected_obj in self.star_name_map:
+            actual_name, catalog_type = self.star_name_map[selected_obj]
+            if catalog_type == 'V':
+                star = self.current_target.variable
+                star_type = "Variable"
+            elif catalog_type == 'C':
+                star = self.current_target.comparison
+                star_type = "Comparison"
+            elif catalog_type == 'K':
+                star = self.current_target.check
+                star_type = "Check"
+        else:
+            # Default to variable star if no mapping
+            star = self.current_target.variable
+            star_type = "Variable"
+        
+        if not star:
+            MessageBox.Show("Could not determine target coordinates.",
+                          "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            return
+        
+        # Get RA and Dec in decimal hours and degrees
+        ra_hours = star.ra_hours + star.ra_minutes/60.0 + star.ra_seconds/3600.0
+        dec_degrees = star.dec_degrees_decimal
+        
+        # Confirm before slewing
+        msg = "%s Star: %s\n\nRA:  %s\nDec: %s\n\nSlew telescope to this position?" % (
+            star_type, star.name,
+            star.ra_string(), star.dec_string())
+        
+        result = MessageBox.Show(msg, "Confirm GOTO",
+                                MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+        
+        if result != DialogResult.Yes:
+            return
+        
+        # Try to slew telescope using SharpCap API
+        try:
+            # Verify CancellationToken is available (should always be true in SharpCap)
+            if CancellationToken is None:
+                MessageBox.Show("GOTO functionality requires SharpCap environment.",
+                              "Not Available", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                return
+            
+            # Check if mount control is available
+            if hasattr(self.SharpCap, 'Mounts') and self.SharpCap.Mounts.SelectedMount:
+                mount = self.SharpCap.Mounts.SelectedMount
+                
+                # Parse coordinates using CoordinateParser
+                coord_string = "%s;%s" % (ra_hours, dec_degrees)
+                coordinates = self.CoordinateParser.Parse(coord_string, True)
+                
+                # Update status and start slew
+                self._update_status("Slewing to %s: %s (RA=%s, Dec=%s)" % (
+                    star_type, star.name, star.ra_string(), star.dec_string()))
+                
+                print("Starting GOTO to: RA %.6fh, Dec %.6f°" % (ra_hours, dec_degrees))
+                
+                # Use SafeGetAsyncResult to properly wait for slew completion
+                self.SharpCap.SafeGetAsyncResult(mount.StartSlewToAsync(coordinates, CancellationToken()))
+                
+                # Wait for mount to settle
+                time.sleep(2)
+                if not mount.IsSettled:
+                    print("Waiting for mount to settle...")
+                    wait_start = time.time()
+                    while not mount.IsSettled and (time.time() - wait_start) < 30:
+                        time.sleep(1)
+                
+                print("GOTO completed: RA %.4fh, Dec %.4f°" % (ra_hours, dec_degrees))
+                self._update_status("GOTO completed to %s: %s" % (star_type, star.name))
+                
+                MessageBox.Show("Telescope has slewed to %s: %s\n\nRA:  %s\nDec: %s" % (
+                    star_type, star.name, star.ra_string(), star.dec_string()),
+                    "GOTO Complete", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                
+            else:
+                # No mount control - offer manual GOTO with clipboard
+                print("Manual GOTO required: RA %.6fh, Dec %.6f°" % (ra_hours, dec_degrees))
+                
+                manual_msg = ("No mount control available.\n\n" +
+                             "Please manually GOTO:\n\n" +
+                             "You can use the SharpCap Push To Assistant\n\n" +
+                             "RA:  %s (%.6f hours)\n" +
+                             "Dec: %s (%.6f°)\n\n" +
+                             "These coordinates have been copied to the clipboard.") % (
+                                star.ra_string(), ra_hours,
+                                star.dec_string(), dec_degrees)
+                
+                # Copy coordinates to clipboard
+                Clipboard.SetText("%.6f, %.6f" % (ra_hours, dec_degrees))
+                
+                MessageBox.Show(manual_msg, "Manual GOTO Required",
+                              MessageBoxButtons.OK, MessageBoxIcon.Information)
+                
+                self._update_status("Manual GOTO: %s - coordinates copied to clipboard" % star.name)
+            
+        except Exception as e:
+            import traceback
+            error_msg = "Error slewing telescope:\n\n%s\n\nDetails:\n%s" % (str(e), traceback.format_exc())
+            print("GOTO execution error: %s" % str(e))
+            MessageBox.Show(error_msg, "GOTO Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            self._update_status("GOTO failed: " + str(e))
+
+
+class StarSelectionDialog(Form):
+    """Dialog for selecting stars from catalog."""
+    
+    def __init__(self, catalog):
+        """
+        Initialize star selection dialog.
+        
+        Args:
+            catalog: StarCatalog object
+        """
+        self.catalog = catalog
+        self.selected_target = None
+        
+        self.Text = "Select Target Star"
+        self.Width = 800
+        self.Height = 600
+        self.StartPosition = FormStartPosition.CenterParent
+        self.FormBorderStyle = FormBorderStyle.FixedDialog
+        self.MaximizeBox = False
+        self.MinimizeBox = False
+        
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        """Setup user interface."""
+        # Suspend layout during setup for better performance
+        self.SuspendLayout()
+        
+        # Search panel at top
+        search_panel = Panel()
+        search_panel.Dock = DockStyle.Top
+        search_panel.Height = 65
+        search_panel.Padding = Padding(10)
+        
+        search_label = Label()
+        search_label.Text = "Search by name:"
+        search_label.Location = Point(10, 15)
+        search_label.Size = Size(100, 20)
+        search_panel.Controls.Add(search_label)
+        
+        self.search_box = TextBox()
+        self.search_box.Location = Point(120, 12)
+        self.search_box.Size = Size(300, 25)
+        self.search_box.TextChanged += self._on_search_changed
+        search_panel.Controls.Add(self.search_box)
+        
+        search_info = Label()
+        search_info.Text = "Type to filter star names (e.g., 'ALF', 'CET', 'NSV')"
+        search_info.Location = Point(430, 15)
+        search_info.Size = Size(250, 20)
+        search_info.ForeColor = Color.Gray
+        search_panel.Controls.Add(search_info)
+        
+        # Results counter
+        self.results_label = Label()
+        self.results_label.Text = "All stars (%d)" % self.catalog.get_count()
+        self.results_label.Location = Point(10, 40)
+        self.results_label.Size = Size(700, 18)
+        self.results_label.ForeColor = Color.Blue
+        self.results_label.Font = Font("Arial", 8, FontStyle.Bold)
+        search_panel.Controls.Add(self.results_label)
+        
+        # Button panel at very bottom
+        button_panel = Panel()
+        button_panel.Dock = DockStyle.Bottom
+        button_panel.Height = 50
+        
+        ok_button = Button()
+        ok_button.Text = "Select"
+        ok_button.Size = Size(100, 30)
+        ok_button.Location = Point(550, 10)
+        ok_button.Click += self._on_ok_click
+        button_panel.Controls.Add(ok_button)
+        
+        cancel_button = Button()
+        cancel_button.Text = "Cancel"
+        cancel_button.Size = Size(100, 30)
+        cancel_button.Location = Point(660, 10)
+        cancel_button.Click += self._on_cancel_click
+        button_panel.Controls.Add(cancel_button)
+        
+        # Detail panel above buttons
+        detail_panel = Panel()
+        detail_panel.Dock = DockStyle.Bottom
+        detail_panel.Height = 150
+        detail_panel.Padding = Padding(10)
+        
+        self.detail_text = TextBox()
+        self.detail_text.Multiline = True
+        self.detail_text.ReadOnly = True
+        self.detail_text.Dock = DockStyle.Fill
+        self.detail_text.ScrollBars = ScrollBars.Vertical
+        self.detail_text.Font = Font("Consolas", 9)
+        detail_panel.Controls.Add(self.detail_text)
+        
+        # ListBox for stars - fills middle space
+        self.star_list = ListBox()
+        self.star_list.Dock = DockStyle.Fill
+        self.star_list.Font = Font("Consolas", 9)
+        self.star_list.SelectedIndexChanged += self._on_star_selected
+        self.star_list.DoubleClick += self._on_star_double_click
+        
+        # Add controls in this specific order
+        self.Controls.Add(self.star_list)      # Fill - add first
+        self.Controls.Add(detail_panel)        # Bottom #1 - add second
+        self.Controls.Add(button_panel)        # Bottom #2 - add third
+        self.Controls.Add(search_panel)        # Top - add last (appears on top)
+        
+        # Resume layout and force refresh
+        self.ResumeLayout(True)
+        self.PerformLayout()
+        
+        self.Controls.Add(button_panel)
+        
+        # Populate list
+        self._populate_list()
+    
+    def _populate_list(self, filter_text=""):
+        """Populate the star list with optional filtering."""
+        # Use BeginUpdate/EndUpdate for better performance and reliability
+        self.star_list.BeginUpdate()
+        try:
+            self.star_list.Items.Clear()
+            
+            filter_upper = filter_text.upper().strip()
+            match_count = 0
+            
+            # Build list of matching items first
+            items_to_add = []
+            
+            # DEBUG: Print what we're searching for
+            if filter_upper:
+                print("Searching for: '%s'" % filter_upper)
+            
+            for target in self.catalog.targets:
+                # Get name and normalize whitespace
+                name = target.variable.name.strip()
+                name_upper = name.upper()
+                
+                # Check if filter matches (case-insensitive substring search)
+                if not filter_upper or filter_upper in name_upper:
+                    vmag_str = "%.2f" % target.variable.vmag if target.variable.vmag is not None else "?.??"
+                    display = "%-15s  V=%-5s  RA=%s  Dec=%s" % (
+                        name, vmag_str, 
+                        target.variable.ra_string(), 
+                        target.variable.dec_string())
+                    items_to_add.append(display)
+                    match_count += 1
+                    
+                    # DEBUG: Print first 10 matches
+                    if filter_upper and match_count <= 10:
+                        print("  Match %d: %s" % (match_count, name))
+            
+            # DEBUG: Print total before adding
+            print("Total matches found: %d" % len(items_to_add))
+            
+            # Add all items at once
+            for item in items_to_add:
+                self.star_list.Items.Add(item)
+            
+            # DEBUG: Print what's in the ListBox after adding
+            print("Items in ListBox: %d" % self.star_list.Items.Count)
+            if filter_upper and self.star_list.Items.Count > 0:
+                print("First item in ListBox: %s" % str(self.star_list.Items[0]))
+                if self.star_list.Items.Count > 1:
+                    print("Last item in ListBox: %s" % str(self.star_list.Items[self.star_list.Items.Count - 1]))
+            
+            # Update results label
+            if filter_upper:
+                self.results_label.Text = "Found %d matches for '%s' (showing %d in list)" % (match_count, filter_text, self.star_list.Items.Count)
+                self.results_label.ForeColor = Color.Green if match_count > 0 else Color.Red
+            else:
+                self.results_label.Text = "All stars (%d loaded)" % self.star_list.Items.Count
+                self.results_label.ForeColor = Color.Blue
+            
+            if self.star_list.Items.Count == 0:
+                self.star_list.Items.Add("(No matches found)")
+                
+        finally:
+            self.star_list.EndUpdate()
+        
+        # Reset scroll position to top AFTER EndUpdate
+        if self.star_list.Items.Count > 0:
+            self.star_list.ClearSelected()  # Clear any selection first
+            self.star_list.TopIndex = 0     # Scroll to top
+            self.star_list.SelectedIndex = -1  # Ensure nothing selected
+    
+    def _on_search_changed(self, sender, event):
+        """Handle search text changed."""
+        self._populate_list(self.search_box.Text)
+    
+    def _on_star_selected(self, sender, event):
+        """Handle star selection changed."""
+        if self.star_list.SelectedIndex < 0:
+            return
+        
+        # Get selected star name (first 15 characters, stripped)
+        selected_text = str(self.star_list.SelectedItem)
+        if selected_text.startswith("(No matches"):
+            return
+        
+        star_name = selected_text[:15].strip()
+        
+        # Find target in catalog
+        target = self.catalog.get_target_by_name(star_name)
+        if target:
+            self.selected_target = target
+            self._show_target_details(target)
+    
+    def _show_target_details(self, target):
+        """Show detailed information about selected target."""
+        details = []
+        details.append("=" * 70)
+        details.append("VARIABLE STAR: " + target.variable.name)
+        details.append("=" * 70)
+        
+        if target.auid:
+            details.append("AAVSO ID: " + target.auid)
+        if target.old_desig:
+            details.append("Old Designation: " + target.old_desig)
+        
+        details.append("")
+        details.append("VARIABLE:")
+        details.append("  RA:            " + target.variable.ra_string())
+        details.append("  Dec:           " + target.variable.dec_string())
+        details.append("  V magnitude:   " + ("%.3f" % target.variable.vmag if target.variable.vmag else "N/A"))
+        details.append("  B-V color:     " + ("%.3f" % target.variable.bv_color if target.variable.bv_color else "N/A"))
+        details.append("  Spectral type: " + target.variable.spectral_type)
+        
+        details.append("")
+        details.append("COMPARISON STAR: " + target.comparison.name)
+        details.append("  RA:          " + target.comparison.ra_string())
+        details.append("  Dec:         " + target.comparison.dec_string())
+        details.append("  V magnitude: " + ("%.3f" % target.comparison.vmag if target.comparison.vmag else "N/A"))
+        details.append("  B-V color:   " + ("%.3f" % target.comparison.bv_color if target.comparison.bv_color else "N/A"))
+        
+        details.append("")
+        details.append("CHECK STAR: " + target.check.name)
+        details.append("  RA:          " + target.check.ra_string())
+        details.append("  Dec:         " + target.check.dec_string())
+        details.append("  V magnitude: " + ("%.3f" % target.check.vmag if target.check.vmag else "N/A"))
+        
+        if target.delta_bv is not None:
+            details.append("")
+            details.append("Delta (B-V) [Variable - Comparison]: %.3f" % target.delta_bv)
+        
+        self.detail_text.Text = "\r\n".join(details)
+    
+    def _on_star_double_click(self, sender, event):
+        """Handle double-click on star (same as clicking OK)."""
+        if self.selected_target:
+            self.DialogResult = DialogResult.OK
+            self.Close()
+    
+    def _on_ok_click(self, sender, event):
+        """Handle OK button click."""
+        if self.selected_target:
+            self.DialogResult = DialogResult.OK
+            self.Close()
+        else:
+            MessageBox.Show("Please select a star first.", "No Selection",
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+    
+    def _on_cancel_click(self, sender, event):
+        """Handle Cancel button click."""
+        self.DialogResult = DialogResult.Cancel
+        self.Close()
+
+
+def show_data_acquisition_window(sharpcap=None, coordinate_parser=None):
+    """Show the data acquisition window.
+    
+    Args:
+        sharpcap: SharpCap object if running in SharpCap, None if standalone
+        coordinate_parser: CoordinateParser class if running in SharpCap, None if standalone
+    """
+    window = SSPDataAcquisitionWindow(sharpcap=sharpcap, coordinate_parser=coordinate_parser)
     window.ShowDialog()

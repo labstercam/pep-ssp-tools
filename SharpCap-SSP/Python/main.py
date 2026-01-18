@@ -78,8 +78,11 @@ else:
 SHARPCAP_AVAILABLE = 'SharpCap' in dir()
 if SHARPCAP_AVAILABLE:
     SHARPCAP_VERSION = "Detected"
+    # Import SharpCap-specific classes
+    from SharpCap.Base import CoordinateParser
 else:
     SHARPCAP_VERSION = "N/A"
+    CoordinateParser = None
     print("Warning: SharpCap not available. Running in standalone mode.")
 
 
@@ -278,7 +281,10 @@ For more information, see the SSPDataq Software Overview document in:
                 sys.path.append(script_dir)
             
             import ssp_dataaq
-            ssp_dataaq.show_data_acquisition_window()
+            # Pass SharpCap object and CoordinateParser (or None) to the window
+            sharpcap_obj = SharpCap if SHARPCAP_AVAILABLE else None
+            coord_parser = CoordinateParser if SHARPCAP_AVAILABLE else None
+            ssp_dataaq.show_data_acquisition_window(sharpcap=sharpcap_obj, coordinate_parser=coord_parser)
             
             # Minimize the launcher window
             self.WindowState = FormWindowState.Minimized

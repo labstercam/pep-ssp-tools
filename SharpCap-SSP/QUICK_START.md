@@ -140,12 +140,26 @@ Your COM port selection is saved in: `Documents\SharpCap\SSP\ssp_config.json`
 2. Select **Object**: 
    - "New Object" for manual entry
    - "SKY" for sky background
-   - "CATALOG" (future feature)
+   - Use **Catalog → Select Target Star** to choose from PEP star catalog
 3. Select **Catalog**: Astar, Foe, Soe, Var, etc.
 4. Click **START**
 5. Watch status messages update as each count completes
 6. Data appears in the display grid when all counts complete
 7. **Optional:** Double-click the data line to add notes/comments
+
+**Using the Star Catalog:**
+1. Go to **Catalog → Select Target Star**
+2. Search for your target by name (e.g., "OMI CET", "ALF CAS")
+3. View target details: RA/Dec, magnitudes, comparison and check stars
+4. Click **Select** to load the target
+5. The target name and comp/check stars appear in the Object combobox
+
+The catalog includes 300+ PEP targets with:
+- Variable star coordinates and magnitudes
+- Comparison star data
+- Check star data
+- AAVSO identifiers
+- Spectral types
 
 **Data Format:**
 ```

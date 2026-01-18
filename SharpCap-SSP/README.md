@@ -34,6 +34,10 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 
 ### Implemented ✅
 - ✅ **SharpCap Integration**: Custom "PEP" toolbar button with icon
+- ✅ **Star Catalog Integration**: PEP variable star catalog with 300+ targets
+  - Load target, comparison, and check stars from starparm_latest.csv
+  - Searchable star database with RA/Dec coordinates and magnitudes
+  - AAVSO designations and spectral types included
 - ✅ Serial COM port connection and management (19200,N,8,1)
 - ✅ Automatic COM port disconnect on program close
 - ✅ SSP photometer command protocol (SSSSSS, SEEEEE, SCnnnn, SGNNN)
