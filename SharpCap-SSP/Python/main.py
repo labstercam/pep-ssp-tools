@@ -16,7 +16,20 @@ import sys
 
 # Add the script directory to Python path for module imports
 import System
-script_dir = System.IO.Path.GetDirectoryName(__file__) if '__file__' in dir() else System.IO.Directory.GetCurrentDirectory()
+import os
+
+# Get script directory - handle different execution contexts
+try:
+    # When run as a file (ipy main.py)
+    if '__file__' in dir():
+        script_dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(__file__))
+    else:
+        # When run via exec() - use current working directory
+        script_dir = os.getcwd()
+except:
+    # Fallback to current directory
+    script_dir = System.IO.Directory.GetCurrentDirectory()
+
 if script_dir not in sys.path:
     sys.path.append(script_dir)
 
@@ -35,7 +48,6 @@ try:
 except:
     # Try to load from local directory (if installed with install.ps1)
     try:
-        import os
         local_dll = os.path.join(script_dir, 'System.IO.Ports.dll')
         if os.path.exists(local_dll):
             clr.AddReferenceToFileAndPath(local_dll)
@@ -312,12 +324,10 @@ def launch_ssp_photometer():
 
 # SharpCap Integration: Add custom button to toolbar
 if SHARPCAP_AVAILABLE:
-    import os
     from System.Drawing import Image
     
-    # Prepare icon path for custom button
-    ssp_script_path = os.path.dirname(__file__) if '__file__' in dir() else os.getcwd()
-    icon_path = os.path.join(ssp_script_path, "SSP.ico")
+    # Use the script_dir already defined at top of file
+    icon_path = os.path.join(script_dir, "SSP.ico")
     
     try:
         # Add custom button to SharpCap UI (same as occultation-manager)
@@ -336,9 +346,9 @@ if SHARPCAP_AVAILABLE:
         print("\nFull traceback:")
         print(traceback.format_exc())
         print("\nSharpCap-SSP can still be launched from the Scripting Console:")
-        print(f"  exec(open(r'{os.path.join(ssp_script_path, 'main.py')}').read())")
+        print(f"  exec(open(r'{os.path.join(script_dir, 'main.py')}').read())")
 
 # Standalone mode: Run directly when script is executed
 else:
-    if __name__ == '__main__':
-        launch_ssp_photometer()
+    # Only run automatically when executed as main script (not when imported or exec'd)
+    launch_ssp_photometer()

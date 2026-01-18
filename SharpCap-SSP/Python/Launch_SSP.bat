@@ -84,7 +84,9 @@ echo.
 echo Starting SSP Photometer Control...
 echo.
 
-"%IPY_EXE%" -c "exec(open('main.py').read())"
+REM Change to script directory and run
+cd /d "%SCRIPT_DIR%"
+"%IPY_EXE%" main.py
 
 REM Check if there was an error
 if %ERRORLEVEL% NEQ 0 (
