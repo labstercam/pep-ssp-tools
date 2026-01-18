@@ -344,7 +344,39 @@ IronPython 3.4 doesn't include serial port support by default. We need to add th
 
 ### Part 3: Run the Application
 
-**Method 1: Interactive Shell**
+**Method 1: Desktop Shortcut (Easiest - Recommended)**
+
+1. **Create the shortcut:**
+   - Navigate to the Python folder in File Explorer
+   - Double-click `Create_Desktop_Shortcut.bat`
+   - A shortcut named **"SSP Photometer"** appears on your desktop with the SSP icon
+
+2. **Launch the application:**
+   - Double-click the desktop shortcut
+   - The application launches immediately
+   - No console or setup needed
+
+**Bonus:** You can also:
+- Drag the shortcut to your taskbar for quick access
+- Move it to your Start menu folder
+- Create copies in other locations
+
+---
+
+**Method 2: Launch Batch File (No Shortcut)**
+
+1. **Navigate to Python folder** in File Explorer
+
+2. **Double-click `Launch_SSP.bat`**
+
+3. **Application launches automatically**
+   - Automatically finds IronPython (even if not in PATH)
+   - Shows helpful error messages if setup incomplete
+   - Checks for System.IO.Ports.dll
+
+---
+
+**Method 3: Interactive Shell (Advanced)**
 
 1. **Open IronPython:**
    ```powershell
@@ -361,18 +393,14 @@ IronPython 3.4 doesn't include serial port support by default. We need to add th
    - Check that COM ports are detected (not showing "Serial ports not available")
    - Status should show: "Available: COM1, COM3, ..." (your actual ports)
 
-**Method 2: Command Line (Quick Launch)**
+---
+
+**Method 4: Command Line (Quick Launch)**
 
 ```powershell
 cd "C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python"
 ipy -c "exec(open('main.py').read())"
 ```
-
-**Method 3: Create a Launch Script (Most Convenient)**
-
-Create a file named `run.bat` in the Python folder:
-
-```batch
 @echo off
 cd /d "%~dp0"
 ipy -c "exec(open('main.py').read())"

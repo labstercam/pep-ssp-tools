@@ -158,33 +158,35 @@ powershell -ExecutionPolicy Bypass -File install.ps1
    copy extracted\lib\net6.0\System.IO.Ports.dll C:\path\to\SharpCap-SSP\Python\
    ```
 
-**Step 3: Run the Application**
+**Step 3: Create Desktop Shortcut (Recommended)**
 
-1. Open IronPython:
-   ```powershell
-   ipy
-   ```
+1. **Double-click** `Create_Desktop_Shortcut.bat` in the Python folder
+2. A desktop shortcut **"SSP Photometer"** will be created with the SSP icon
+3. Double-click the shortcut to launch SSP anytime
 
-2. Run main.py:
-   ```python
-   >>> exec(open('C:\\path\\to\\SharpCap-SSP\\Python\\main.py').read())
-   ```
+**Alternative Launch Methods:**
 
-3. The application window should appear with COM ports available!
+**Option A: Use Launch_SSP.bat**
+- Double-click `Launch_SSP.bat` directly
+- Automatically finds IronPython even if not in PATH
+- Shows helpful errors if setup incomplete
 
-**Troubleshooting:**
-- If you see "Serial ports not available", the DLL wasn't loaded correctly
-- Verify `System.IO.Ports.dll` exists in the Python folder
-- See [Python/SETUP.md](Python/SETUP.md) for detailed troubleshooting
+**Option B: Command Line**
+
+```powershell
+ipy
+>>> exec(open('C:\\path\\to\\main.py').read())
+```
+
+Or with full path:
+```powershell
+ipy -c "exec(open('main.py').read())"
+```
 
 **Quick Launch (after setup):**
-Create a batch file `run.bat` in the Python folder:
-```batch
-@echo off
-ipy -c "exec(open('main.py').read())"
-pause
-```
-Double-click to launch!
+- Double-click the desktop shortcut (easiest)
+- Or double-click `Launch_SSP.bat`
+- Or run from command line
 
 ## Quick Start
 

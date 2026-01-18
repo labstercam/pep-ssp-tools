@@ -53,18 +53,14 @@ Done! All dependencies are included.
 
 **One-Time Setup:**
 1. Download and install IronPython 3.4: https://github.com/IronLanguages/ironpython3/releases
-2. Navigate to the Python folder:
-   ```powershell
-   cd C:\\path\\to\\SharpCap-SSP\\Python
-   ```
-3. Run the installer:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File install.ps1
-   ```
-4. Launch the application:
-   ```powershell
-   ipy -c \"exec(open('main.py').read())\"
-   ```
+2. Navigate to the Python folder in File Explorer
+3. Right-click `install.ps1` and select **"Run with PowerShell"**
+4. Double-click `Create_Desktop_Shortcut.bat` to create a desktop icon
+
+**Daily Use:**
+- Double-click the **"SSP Photometer"** desktop icon
+- Application launches with SSP icon
+- Or double-click `Launch_SSP.bat` in the Python folder
 
 **For detailed setup instructions, see [Python/SETUP.md](Python/SETUP.md)**
 
