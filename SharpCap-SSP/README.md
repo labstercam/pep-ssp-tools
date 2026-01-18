@@ -104,16 +104,19 @@ Done! All dependencies are already included in SharpCap.
 
 **Method A: Automatic Installation (Recommended)**
 
-1. Open PowerShell
-2. Navigate to the Python folder:
-   ```powershell
-   cd C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python
+1. Navigate to the Python folder in File Explorer:
    ```
-3. Run the installation script:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File install.ps1
+   C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python
    ```
-4. Wait for "Installation successful!" message
+2. **Right-click** `install.ps1` and select **"Run with PowerShell"**
+3. Wait for "Installation successful!" message
+4. Press any key to close
+
+**Alternative - Command Line:**
+```powershell
+cd C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
 
 **Method B: Manual Installation (If PowerShell script fails)**
 

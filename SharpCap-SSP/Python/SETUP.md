@@ -86,24 +86,20 @@ IronPython 3.4 doesn't include serial port support by default. We need to add th
 
 **This is the easiest method - fully automated!**
 
-1. **Open PowerShell:**
-   - Press `Win + X`
-   - Select "Windows PowerShell" or "Terminal"
+**Option 1: Right-Click Method (Easiest)**
 
-2. **Navigate to the Python folder:**
-   ```powershell
-   cd "C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python"
-   ```
-   
-   Replace `YourName` with your actual username.
+1. **Navigate to the Python folder:**
+   - Open File Explorer
+   - Go to: `C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python`
+   - Replace `YourName` with your actual username
 
-3. **Run the installation script:**
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File install.ps1
-   ```
+2. **Run the script:**
+   - Find the file `install.ps1`
+   - **Right-click** on `install.ps1`
+   - Select **"Run with PowerShell"**
 
-4. **Wait for completion:**
-   You should see:
+3. **Wait for completion:**
+   A PowerShell window will open and you'll see:
    ```
    ============================================================
    SharpCap-SSP Setup - Installing System.IO.Ports
@@ -124,7 +120,39 @@ IronPython 3.4 doesn't include serial port support by default. We need to add th
    
    System.IO.Ports.dll has been copied to:
      C:\...\SharpCap-SSP\Python\System.IO.Ports.dll
+   
+   Press any key to continue...
    ```
+
+4. **Press any key** to close the window
+
+5. **Verify:**
+   In the same folder, you should now see `System.IO.Ports.dll`
+
+**Done!** Skip to [Part 3: Run the Application](#part-3-run-the-application)
+
+---
+
+**Option 2: Command Line Method (Alternative)**
+
+1. **Open PowerShell:**
+   - Press `Win + X`
+   - Select "Windows PowerShell" or "Terminal"
+
+2. **Navigate to the Python folder:**
+   ```powershell
+   cd "C:\Users\YourName\Documents\GitHub\pep-ssp-tools\SharpCap-SSP\Python"
+   ```
+   
+   Replace `YourName` with your actual username.
+
+3. **Run the installation script:**
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File install.ps1
+   ```
+
+4. **Wait for completion:**
+   You should see the same success message as above.
 
 5. **Verify:**
    Check that `System.IO.Ports.dll` exists in the Python folder:
