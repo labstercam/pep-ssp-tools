@@ -6,11 +6,11 @@ SharpCap-SSP is a Python-based tool for integrating Optec SSP photometers with S
 
 ## 📥 Quick Download
 
-**Latest Release: v0.1.0**
+**Latest Release: v0.1.3**
 
-https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.0 
+https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.3 
 
-### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.0.zip)
+### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.3.zip)
 
 *Non-experts: Just download the ZIP, extract it, and follow the `QUICK_INSTALL.txt` file inside.*
 
@@ -20,11 +20,13 @@ https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.0
 
 This tool replicates the core data collection functionality of the original SSPDataq software, enabling serial communication and photometer control directly within the SharpCap environment or standalone.
 
-## Status: Version 0.1.0 - Fully Functional
+## Status: Version 0.1.3 - Fully Functional
 
 ✅ **Serial communication implemented and tested**
 ✅ **Data collection working (slow mode + trial mode)**
 ✅ **File export in SSPDataq .raw format**
+✅ **First order extinction star selection with airmass filtering**
+✅ **Real-time Alt/Az coordinate display**
 ✅ **Test scripts included for verification**
 
 See [QUICK_START.md](QUICK_START.md) for usage instructions.
@@ -38,6 +40,15 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
   - Load target, comparison, and check stars from starparm_latest.csv
   - Searchable star database with RA/Dec coordinates and magnitudes
   - AAVSO designations and spectral types included
+- ✅ **First Order Extinction**: Dedicated extinction standard star selection
+  - 150+ extinction standards from Landolt, Cousins, & Graham
+  - Airmass-based filtering with 7 preset filters (1.0-2.5 in 0.25 steps)
+  - Automatic filter progression for systematic observations
+  - Real-time Alt/Az/Airmass calculations
+- ✅ **Coordinate Display**: Real-time altitude and azimuth for all targets
+  - Alt/Az shown in both target star and extinction star grids
+  - Corrected azimuth calculation matching planetarium software
+  - Below-horizon stars automatically filtered
 - ✅ Serial COM port connection and management (19200,N,8,1)
 - ✅ Automatic COM port disconnect on program close
 - ✅ SSP photometer command protocol (SSSSSS, SEEEEE, SCnnnn, SGNNN)
@@ -53,17 +64,16 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 - ✅ Gain control (1, 10, 100) with proper acknowledgment
 - ✅ UTC time recording with mid-point correction
 - ✅ Configuration management (Documents\SharpCap\SSP\)
-- ✅ Night mode (red screen for dark adaptation)
+- ✅ Night mode (red screen for dark adaptation) with button highlighting
 - ✅ Interactive test script (ssp_quick_test.py)
 - ✅ Automated test suite (ssp_test_serial.py)
 
 ### Not Yet Implemented ⏸️
 - ⏸️ **Fast Mode**: 100-5000 rapid readings
 - ⏸️ **Very Fast Mode**: Ultra-rapid 20ms integrations (SSP-5 only)
-- ⏸️ Automatic filter bar control
-- ⏸️ Catalog loading from files
+- ⏸️ Catalog loading from additional catalog files
 - ⏸️ Script automation (.ssp files)
-- ⏸️ Telescope integration
+- ⏸️ Advanced telescope integration features
 - ⏸️ Data reduction/magnitude calculation
 
 ## Requirements

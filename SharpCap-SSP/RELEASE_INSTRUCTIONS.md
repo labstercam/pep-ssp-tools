@@ -13,6 +13,7 @@ Package the following files from `SharpCap-SSP/Python/`:
 - ssp_config.py
 - ssp_dialogs.py
 - ssp_catalog.py
+- ssp_extinction.py
 - night_mode.py
 
 **Installation & Launch Scripts:**
@@ -28,6 +29,7 @@ Package the following files from `SharpCap-SSP/Python/`:
 **Assets:**
 - SSP.ico
 - starparm_latest.csv
+- first_order_extinction_stars.csv
 - requirements.txt
 
 ### ZIP Structure
@@ -43,9 +45,11 @@ SharpCap-SSP/
 ├── ssp_config.py
 ├── ssp_dialogs.py
 ├── ssp_catalog.py
+├── ssp_extinction.py
 ├── night_mode.py
 ├── SSP.ico
 ├── starparm_latest.csv
+├── first_order_extinction_stars.csv
 ├── install.ps1
 ├── Launch_SSP.bat
 ├── Create_Desktop_Shortcut.bat
@@ -60,17 +64,45 @@ SharpCap-SSP/
 2. **Create new release:**
    - Click "Releases" (right sidebar)
    - Click "Create a new release"
-
-3. **Set version tag:**
-   - Tag: `v0.1.2`
+3`
    - Target: `main` branch
-   - Release title: `SharpCap-SSP v0.1.2 - Filter Control & SharpCap Integration`
+   - Release title: `SharpCap-SSP v0.1.3 - First Order Extinction & Coordinate Display`
 
 4. **Write release notes:**
    ```markdown
-   # SharpCap-SSP v0.1.2 - Filter Control & SharpCap Integration
+   # SharpCap-SSP v0.1.3 - First Order Extinction & Coordinate Display
    
    Control software for Optec SSP-3a/SSP-5a photometers with SharpCap integration.
+   
+   ## 🎯 Major Features in v0.1.3
+   
+   ### First Order Extinction Star Selection
+   - ✅ **Extinction standard star catalog** - 150+ standards from Landolt, Cousins, & Graham catalogs
+   - ✅ **Airmass-based filtering** - 7 preset filters (1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5) with ±0.15 tolerance
+   - ✅ **Automatic filter progression** - Dialog remembers last filter and auto-advances to next on reopen
+   - ✅ **Sorted by airmass** - Stars displayed from lowest to highest airmass for optimal observing
+   - ✅ **Real-time calculations** - Alt/Az/Airmass computed using observer location and current UTC time
+   - ✅ **Catalog integration** - Selecting extinction star sets catalog dropdown to "Foe"
+   - ✅ **GOTO support** - Selected extinction stars work with telescope GOTO commands
+   
+   ### Coordinate Display Improvements
+   - ✅ **Alt/Az columns** - Both target star and extinction star grids show altitude and azimuth
+   - ✅ **Fixed azimuth calculation** - Corrected to match standard astronomical conventions and planetarium software
+   - ✅ **0 decimal place formatting** - Alt/Az displayed as integers for clarity (e.g., "Alt: 61, Az: 7")
+   - ✅ **Below-horizon filtering** - Stars below horizon excluded from display automatically
+   
+   ### Night Mode Enhancements
+   - ✅ **Active filter highlighting** - Selected airmass filter button clearly indicated in both normal and night modes
+   - ✅ **Dark red theme** - Active buttons use dark red background with bright red border in night mode
+   - ✅ **Consistent experience** - All UI elements respect night mode settings
+   
+   ### Bug Fixes
+   - 🐛 Fixed Alt/Az showing "?" in target star selection when coordinates present
+   - 🐛 Corrected azimuth calculation for proper east/west orientation
+   - 🐛 Fixed auto-filter not applying on extinction dialog open
+   - 🐛 Fixed button highlighting not visible in normal and night modes
+   
+   ## 📋 Previous Features (v0.1.2)-3a/SSP-5a photometers with SharpCap integration.
    
    ## 🎯 Major Features in v0.1.2
    

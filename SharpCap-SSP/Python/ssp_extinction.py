@@ -315,19 +315,19 @@ class AirmassCalculator:
         alt_rad = math.asin(sin_alt)
         altitude = math.degrees(alt_rad)
         
-        # Calculate azimuth
-        cos_az = (math.sin(dec_rad) - math.sin(lat_rad) * sin_alt) / \
+        # Calculate azimuth using standard formula
+        # Az measured from North (0°) through East (90°), South (180°), West (270°)
+        # Note: negative sign on sin component for correct east/west orientation
+        sin_az = -math.sin(ha_rad) * math.cos(dec_rad) / math.cos(alt_rad)
+        cos_az = (math.sin(dec_rad) - math.sin(lat_rad) * math.sin(alt_rad)) / \
                  (math.cos(lat_rad) * math.cos(alt_rad))
         
-        # Clamp to [-1, 1] to avoid numerical errors
-        cos_az = max(-1.0, min(1.0, cos_az))
+        # Use atan2 for proper quadrant
+        azimuth = math.degrees(math.atan2(sin_az, cos_az))
         
-        az_rad = math.acos(cos_az)
-        azimuth = math.degrees(az_rad)
-        
-        # Correct azimuth based on hour angle
-        if math.sin(ha_rad) > 0:
-            azimuth = 360.0 - azimuth
+        # Normalize to 0-360 range
+        if azimuth < 0:
+            azimuth += 360.0
         
         return (altitude, azimuth)
     
