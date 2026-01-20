@@ -102,6 +102,25 @@ This opens a test window where you can:
 
 Your COM port selection is saved in: `Documents\SharpCap\SSP\ssp_config.json`
 
+### 3. Configure Filter Mode (IMPORTANT)
+
+**Before collecting data, you MUST configure the correct filter mode:**
+
+1. Go to **Setup → Auto/Manual Filters**
+2. Choose based on your hardware:
+
+   **Select AUTO if:**
+   - ✅ You have an SSP with a 6-position automated filter slider
+   - ✅ The filter wheel moves automatically when you send commands
+   - Example: SSP-3a with optional motorized filter upgrade
+
+   **Select MANUAL if:**
+   - ✅ You have a standard 2-position manual slider
+   - ✅ You manually slide filters in and out
+   - This is the default for most SSP units
+
+**⚠️ WARNING:** The SSP firmware will acknowledge filter commands even if you don't have automated filter hardware. If you select Auto mode without the hardware, the software will report "filter moved" but no physical movement occurs. Always verify your hardware configuration.
+
 ---
 
 ## Basic Operation
@@ -122,7 +141,9 @@ Your COM port selection is saved in: `Documents\SharpCap\SSP\ssp_config.json`
 
 #### Trial Mode (Quick Test)
 1. Select settings:
-   - **Filter**: V (or desired filter - manual change on photometer)
+   - **Filter**: V (or desired filter)
+     - **Auto mode**: Filter moves automatically
+     - **Manual mode**: Change filter manually on photometer when prompted
    - **Gain**: 10 (typical starting point)
    - **Integ(sec)**: 1.00 (options: 0.02, 0.05, 0.10, 0.50, 1.00, 5.00, 10.00)
    - **Count**: trial
@@ -132,7 +153,9 @@ Your COM port selection is saved in: `Documents\SharpCap\SSP\ssp_config.json`
 
 #### Slow Mode (Scientific Data)
 1. Select settings:
-   - **Filter**: V, B, R, I, etc. (change manually on photometer)
+   - **Filter**: V, B, R, I, etc.
+     - **Auto mode**: Filter moves automatically when you select it
+     - **Manual mode**: Change filter manually when prompted
    - **Gain**: 10 (adjust based on count rates)
    - **Integ(sec)**: 5.00 (typical for stars)
    - **Interval**: 3 (options: 1-4 for slow, 100-5000 for fast mode)

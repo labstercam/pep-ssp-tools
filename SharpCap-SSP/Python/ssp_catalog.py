@@ -6,7 +6,7 @@ Module for loading and managing PEP photometry target star catalogs.
 Handles variable, comparison, and check star data from CSV files.
 
 Author: pep-ssp-tools project
-Version: 0.1.0
+Version: 0.1.2
 Date: January 2026
 
 CSV Format (30 columns):
