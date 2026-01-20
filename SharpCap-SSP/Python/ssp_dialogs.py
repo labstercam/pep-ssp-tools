@@ -5,7 +5,7 @@ SSP Dialog Windows
 Dialog windows for configuration and data entry.
 
 Author: pep-ssp-tools project
-Version: 0.1.0
+Version: 0.1.2
 """
 
 import clr
@@ -223,6 +223,170 @@ class ObserverInfoDialog(Form):
         """Handle OK button."""
         self.telescope_name = self.tel_text.Text
         self.observer_name = self.obs_text.Text
+        self.DialogResult = DialogResult.OK
+        self.Close()
+    
+    def _on_cancel(self, sender, event):
+        """Handle Cancel button."""
+        self.DialogResult = DialogResult.Cancel
+        self.Close()
+
+
+class FilterBarSetupDialog(Form):
+    """Dialog for configuring filter bars (replicates SSPDataq Filter Bar Setup)."""
+    
+    def __init__(self, filter_bars, active_bar):
+        """Initialize filter bar setup dialog.
+        
+        Args:
+            filter_bars: List of 3 lists, each containing 6 filter names
+            active_bar: Currently active bar (1, 2, or 3)
+        """
+        self.filter_bars = [list(bar) for bar in filter_bars]  # Deep copy
+        self.active_bar = active_bar
+        self.modified = False
+        
+        self.Text = "Edit Filter Bar"
+        self.Width = 450
+        self.Height = 340
+        self.StartPosition = FormStartPosition.CenterParent
+        self.FormBorderStyle = FormBorderStyle.FixedDialog
+        self.MaximizeBox = False
+        self.MinimizeBox = False
+        
+        # Instruction label
+        inst_label = Label()
+        inst_label.Text = "Use uppercase for Johnson/Cousins UBVRI\nand lowercase for Sloan ugriz"
+        inst_label.Location = Point(10, 10)
+        inst_label.Size = Size(370, 50)
+        self.Controls.Add(inst_label)
+        
+        # Filter Bar selection label
+        bar_label = Label()
+        bar_label.Text = "Filter Bar"
+        bar_label.Location = Point(10, 70)
+        bar_label.Size = Size(90, 20)
+        self.Controls.Add(bar_label)
+        
+        # Radio buttons for filter bar selection
+        self.radio_bar1 = RadioButton()
+        self.radio_bar1.Text = "1"
+        self.radio_bar1.Location = Point(110, 70)
+        self.radio_bar1.Size = Size(50, 22)
+        self.radio_bar1.CheckedChanged += self._on_bar_changed
+        self.Controls.Add(self.radio_bar1)
+        
+        self.radio_bar2 = RadioButton()
+        self.radio_bar2.Text = "2"
+        self.radio_bar2.Location = Point(110, 105)
+        self.radio_bar2.Size = Size(50, 22)
+        self.radio_bar2.CheckedChanged += self._on_bar_changed
+        self.Controls.Add(self.radio_bar2)
+        
+        self.radio_bar3 = RadioButton()
+        self.radio_bar3.Text = "3"
+        self.radio_bar3.Location = Point(110, 140)
+        self.radio_bar3.Size = Size(50, 22)
+        self.radio_bar3.CheckedChanged += self._on_bar_changed
+        self.Controls.Add(self.radio_bar3)
+        
+        # ListBox for filter positions (create BEFORE setting radio button checked state)
+        self.filter_list = ListBox()
+        self.filter_list.Location = Point(200, 70)
+        self.filter_list.Size = Size(210, 130)
+        self.filter_list.Font = Font("Courier New", 9)
+        self.filter_list.DoubleClick += self._on_edit_filter
+        self.Controls.Add(self.filter_list)
+        
+        # Set active radio button (this triggers _on_bar_changed which calls _load_filter_list)
+        if active_bar == 1:
+            self.radio_bar1.Checked = True
+        elif active_bar == 2:
+            self.radio_bar2.Checked = True
+        else:
+            self.radio_bar3.Checked = True
+        
+        # Buttons
+        complete_btn = Button()
+        complete_btn.Text = "Complete"
+        complete_btn.Location = Point(200, 230)
+        complete_btn.Size = Size(100, 30)
+        complete_btn.Click += self._on_complete
+        self.Controls.Add(complete_btn)
+        
+        cancel_btn = Button()
+        cancel_btn.Text = "Cancel"
+        cancel_btn.Location = Point(310, 230)
+        cancel_btn.Size = Size(100, 30)
+        cancel_btn.Click += self._on_cancel
+        self.Controls.Add(cancel_btn)
+        
+        self.AcceptButton = complete_btn
+        self.CancelButton = cancel_btn
+    
+    def _load_filter_list(self):
+        """Load filter names for current bar into listbox."""
+        self.filter_list.Items.Clear()
+        bar_index = self.active_bar - 1
+        
+        # Ensure the bar exists
+        if bar_index >= len(self.filter_bars):
+            return
+        
+        bar = self.filter_bars[bar_index]
+        for i in range(6):
+            # Get filter name, use default if index out of bounds
+            if i < len(bar):
+                filter_name = bar[i]
+            else:
+                filter_name = 'f' + str(bar_index * 6 + i + 1)
+            # Format as "Position N: Name"
+            self.filter_list.Items.Add("Position " + str(i+1) + ": " + filter_name)
+    
+    def _on_bar_changed(self, sender, event):
+        """Handle filter bar radio button change."""
+        if not sender.Checked:
+            return
+        
+        if self.radio_bar1.Checked:
+            self.active_bar = 1
+        elif self.radio_bar2.Checked:
+            self.active_bar = 2
+        elif self.radio_bar3.Checked:
+            self.active_bar = 3
+        
+        self._load_filter_list()
+    
+    def _on_edit_filter(self, sender, event):
+        """Handle double-click to edit filter name."""
+        if self.filter_list.SelectedIndex < 0:
+            return
+        
+        position = self.filter_list.SelectedIndex
+        bar_index = self.active_bar - 1
+        current_name = self.filter_bars[bar_index][position]
+        
+        # Prompt for new filter name
+        from Microsoft.VisualBasic import Interaction
+        new_name = Interaction.InputBox(
+            "Filter Edit\nEnter new filter name:",
+            "Edit Filter Position " + str(position + 1),
+            current_name,
+            -1, -1
+        )
+        
+        # Trim whitespace and check if not empty and different
+        if new_name:
+            new_name = new_name.strip()
+            if new_name and new_name != current_name:
+                self.filter_bars[bar_index][position] = new_name
+                self.modified = True
+                self._load_filter_list()
+                # Re-select the edited item
+                self.filter_list.SelectedIndex = position
+    
+    def _on_complete(self, sender, event):
+        """Handle Complete button."""
         self.DialogResult = DialogResult.OK
         self.Close()
     

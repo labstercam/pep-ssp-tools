@@ -6,7 +6,7 @@ Main entry point for SharpCap-SSP photometer control tool.
 Provides integration between Optec SSP photometers and SharpCap software.
 
 Author: pep-ssp-tools project
-Version: 0.1.0
+Version: 0.1.2
 Date: January 2026
 """
 
@@ -91,9 +91,9 @@ class SSPMainWindow(Form):
     
     def __init__(self):
         """Initialize the main window."""
-        self.Text = "SharpCap-SSP Photometer Control v0.1.0"
-        self.Width = 600
-        self.Height = 500
+        self.Text = "SharpCap-SSP Photometer Control v0.1.2"
+        self.Width = 720
+        self.Height = 525
         self.StartPosition = FormStartPosition.CenterScreen
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
@@ -114,7 +114,7 @@ class SSPMainWindow(Form):
         title_label.Text = "SharpCap-SSP Photometer Control"
         title_label.Font = Font("Arial", 16, FontStyle.Bold)
         title_label.Location = Point(10, 10)
-        title_label.Size = Size(560, 30)
+        title_label.Size = Size(680, 30)
         title_label.TextAlign = ContentAlignment.MiddleCenter
         main_panel.Controls.Add(title_label)
         
@@ -123,60 +123,36 @@ class SSPMainWindow(Form):
         description.Multiline = True
         description.ReadOnly = True
         description.Location = Point(10, 50)
-        description.Size = Size(560, 200)
+        description.Size = Size(672, 210)
         description.ScrollBars = ScrollBars.Vertical
         description.BackColor = SystemColors.Control
         description.Font = Font("Consolas", 9)
         
-        description_text = """ABOUT SHARPCAP-SSP
-==================
-
-SharpCap-SSP is a Python-based integration tool for controlling Optec SSP 
-single-channel photometers directly within SharpCap astronomical software.
-
-PURPOSE:
-This tool replicates the core data collection functionality of the original 
-SSPDataq software, enabling:
-
-• Serial COM port communication with SSP-3a and SSP-5a photometers
-• Multiple data acquisition modes (Slow, Fast, Very Fast)
-• Real-time photometric data collection synchronized with imaging
-• Output compatible with existing photometry reduction pipelines
-
-SUPPORTED HARDWARE:
-• Optec SSP-3a: Single-channel photometer with PMT detector
-• Optec SSP-5a: Enhanced single-channel photometer
-
-SERIAL COMMUNICATION:
-• Baud Rate: 19200 bps, 8 data bits, No parity, 1 stop bit
-• Command protocol: ASCII text-based SSP command set
-• Modes: Trial, Slow (1-4 readings), Fast (100-5000 readings)
-
-DATA COLLECTION MODES:
-• Slow Mode: Scientific photometry with 1, 5, or 10-second integrations
-• Fast Mode: Rapid photometry for variable phenomena (0.05 to 10 seconds)
-• Very Fast Mode: Ultra-rapid 20ms integrations (SSP-5 only)
-
-INTEGRATION:
-• Works within SharpCap scripting environment (IronPython)
-• Coordinates with SharpCap's telescope and camera control
-• Saves data in standard .raw format for reduction software
-
-DEVELOPMENT STATUS:
-Version 0.1.0 (Alpha) - User interface framework
-Planned: Serial communication, data acquisition, file management
-
-For more information, see the SSPDataq Software Overview document in:
-../SSPDataq/Analysis/SSPDataq_Software_Overview.md
-"""
+        description_text = "ABOUT SHARPCAP-SSP\r\n"
+        description_text += "==================\r\n\r\n"
+        description_text += "SharpCap-SSP is a Python-based integration tool for controlling Optec SSP\r\n"
+        description_text += "single-channel photometers within SharpCap astronomical software.\r\n\r\n"
+        description_text += "KEY FEATURES:\r\n"
+        description_text += "  * Serial COM communication with SSP-3a and SSP-5a photometers\r\n"
+        description_text += "  * Multiple data acquisition modes (Slow, Fast, Very Fast)\r\n"
+        description_text += "  * Automated and manual filter bar control (SSP-5a)\r\n"
+        description_text += "  * Star catalog integration with GOTO support (SSP-5a)\r\n"
+        description_text += "  * Real-time photometric data collection\r\n"
+        description_text += "  * Configuration compatible with SSPDataq\r\n"
+        description_text += "  * Night mode UI for dark adaptation\r\n"
+        description_text += "  * Output in standard .raw format\r\n\r\n"
+        description_text += "VERSION: v0.1.2 (Alpha)\r\n"
+        description_text += "Development Status: Core functionality implemented\r\n\r\n"
+        description_text += "For documentation, see:\r\n"
+        description_text += "../SSPDataq/Analysis/SSPDataq_Software_Overview.md"
         description.Text = description_text
         main_panel.Controls.Add(description)
         
         # Status group box
         status_group = GroupBox()
         status_group.Text = "System Status"
-        status_group.Location = Point(10, 260)
-        status_group.Size = Size(560, 100)
+        status_group.Location = Point(10, 270)
+        status_group.Size = Size(672, 100)
         
         # SharpCap status
         sharpcap_label = Label()
@@ -193,7 +169,7 @@ For more information, see the SSPDataq Software Overview document in:
             sharpcap_status.Text = "Not Available (Standalone Mode)"
             sharpcap_status.ForeColor = Color.Orange
         sharpcap_status.Location = Point(110, 25)
-        sharpcap_status.Size = Size(430, 20)
+        sharpcap_status.Size = Size(550, 20)
         status_group.Controls.Add(sharpcap_status)
         
         # COM Port status
@@ -216,7 +192,7 @@ For more information, see the SSPDataq Software Overview document in:
             com_status.Text = "Serial ports not available (missing System.IO.Ports)"
             com_status.ForeColor = Color.Orange
         com_status.Location = Point(110, 50)
-        com_status.Size = Size(430, 20)
+        com_status.Size = Size(550, 20)
         status_group.Controls.Add(com_status)
         
         # Module status
@@ -227,24 +203,24 @@ For more information, see the SSPDataq Software Overview document in:
         status_group.Controls.Add(module_label)
         
         module_status = Label()
-        module_status.Text = "UI Framework Loaded (Data collection not yet implemented)"
-        module_status.ForeColor = Color.Blue
+        module_status.Text = "Serial comm, data acquisition, filter control, catalog ready"
+        module_status.ForeColor = Color.Green
         module_status.Location = Point(110, 75)
-        module_status.Size = Size(430, 20)
+        module_status.Size = Size(550, 20)
         status_group.Controls.Add(module_status)
         
         main_panel.Controls.Add(status_group)
         
         # Button panel
         button_panel = Panel()
-        button_panel.Location = Point(10, 370)
-        button_panel.Size = Size(560, 50)
+        button_panel.Location = Point(10, 380)
+        button_panel.Size = Size(672, 50)
         
         # Launch SSPDataq3 button
         launch_button = Button()
         launch_button.Text = "Launch SSPDataq3"
         launch_button.Size = Size(130, 30)
-        launch_button.Location = Point(160, 10)
+        launch_button.Location = Point(210, 10)
         launch_button.Click += self._on_launch_dataaq
         button_panel.Controls.Add(launch_button)
         
@@ -252,7 +228,7 @@ For more information, see the SSPDataq Software Overview document in:
         close_button = Button()
         close_button.Text = "Close"
         close_button.Size = Size(100, 30)
-        close_button.Location = Point(300, 10)
+        close_button.Location = Point(350, 10)
         close_button.Click += self._on_close_click
         button_panel.Controls.Add(close_button)
         
@@ -263,9 +239,9 @@ For more information, see the SSPDataq Software Overview document in:
         
         # Footer label
         footer_label = Label()
-        footer_label.Text = "Part of the pep-ssp-tools project | Alpha Development Version"
-        footer_label.Location = Point(10, 430)
-        footer_label.Size = Size(560, 20)
+        footer_label.Text = "Part of the pep-ssp-tools project | v0.1.2 Alpha"
+        footer_label.Location = Point(10, 460)
+        footer_label.Size = Size(680, 20)
         footer_label.TextAlign = ContentAlignment.MiddleCenter
         footer_label.ForeColor = Color.Gray
         footer_label.Font = Font("Arial", 8, FontStyle.Italic)
@@ -284,15 +260,25 @@ For more information, see the SSPDataq Software Overview document in:
             # Pass SharpCap object and CoordinateParser (or None) to the window
             sharpcap_obj = SharpCap if SHARPCAP_AVAILABLE else None
             coord_parser = CoordinateParser if SHARPCAP_AVAILABLE else None
-            ssp_dataaq.show_data_acquisition_window(sharpcap=sharpcap_obj, coordinate_parser=coord_parser)
             
             # Minimize the launcher window
             self.WindowState = FormWindowState.Minimized
+            
+            # Show the data acquisition window with a callback to restore the launcher when closed
+            ssp_dataaq.show_data_acquisition_window(
+                sharpcap=sharpcap_obj, 
+                coordinate_parser=coord_parser,
+                on_close_callback=self._restore_launcher
+            )
         except Exception as e:
             import traceback
             error_detail = traceback.format_exc()
             MessageBox.Show("Error launching data acquisition window:\n\n" + str(e) + "\n\nDetails:\n" + error_detail, 
                           "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+    
+    def _restore_launcher(self):
+        """Restore the launcher window from minimized state."""
+        self.WindowState = FormWindowState.Normal
         
     def _on_close_click(self, sender, event):
         """Handle close button click."""
@@ -302,7 +288,7 @@ For more information, see the SSPDataq Software Overview document in:
 def launch_ssp_photometer():
     """Main entry point for SharpCap-SSP."""
     print("=" * 60)
-    print("SharpCap-SSP Photometer Control v0.1.0")
+    print("SharpCap-SSP Photometer Control v0.1.2")
     print("=" * 60)
     print("")
     

@@ -6,7 +6,7 @@ Provides red night vision mode for SSP controls.
 Placeholder implementation - to be enhanced with occultation-manager code.
 
 Author: pep-ssp-tools project
-Version: 0.1.0
+Version: 0.1.2
 """
 
 import clr

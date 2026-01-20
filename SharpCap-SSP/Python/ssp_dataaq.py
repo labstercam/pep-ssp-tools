@@ -6,7 +6,7 @@ Main data acquisition window for SharpCap-SSP.
 Replicates SSPDataq3 functionality.
 
 Author: pep-ssp-tools project
-Version: 0.1.0
+Version: 0.1.2
 """
 
 import clr
@@ -80,6 +80,9 @@ class SSPDataAcquisitionWindow(Form):
         # Dictionary to map object combo display names to (actual_name, catalog_type)
         # catalog_type: 'V' for variable, 'C' for comparison, 'K' for check
         self.star_name_map = {}
+        
+        # Flag to prevent recursion during filter combo updates
+        self.updating_filter_combo = False
         
         # Store currently selected target triple for GOTO functionality
         self.current_target = None
@@ -173,6 +176,16 @@ class SSPDataAcquisitionWindow(Form):
         
         setup_menu.DropDownItems.Add(ToolStripSeparator())
         
+        filter_bar_item = ToolStripMenuItem("Filter Bar Setup")
+        filter_bar_item.Click += self._on_filter_bar_setup
+        setup_menu.DropDownItems.Add(filter_bar_item)
+        
+        auto_manual_item = ToolStripMenuItem("Auto/Manual Filters")
+        auto_manual_item.Click += self._on_auto_manual_filters
+        setup_menu.DropDownItems.Add(auto_manual_item)
+        
+        setup_menu.DropDownItems.Add(ToolStripSeparator())
+        
         night_item = ToolStripMenuItem("Night/Day Screen")
         night_item.Click += self._on_toggle_night_mode
         setup_menu.DropDownItems.Add(night_item)
@@ -220,13 +233,9 @@ class SSPDataAcquisitionWindow(Form):
         self.filter_combo.Location = Point(x, y + 20)
         self.filter_combo.Size = Size(80, 25)
         self.filter_combo.DropDownStyle = ComboBoxStyle.DropDownList
-        filters = self.config.get('filters', ['U', 'B', 'V', 'R', 'I', 'Dark'])
-        for f in filters:
-            self.filter_combo.Items.Add(f)
-        self.filter_combo.Items.Add("Home")
-        # Always default to V filter (index 2)
-        v_index = filters.index('V') if 'V' in filters else 0
-        self.filter_combo.SelectedIndex = v_index
+        self.filter_combo.SelectedIndexChanged += self._on_filter_changed
+        # Use new filter bar configuration system
+        self._update_filter_combo()
         self.Controls.Add(self.filter_combo)
         
         x += 90
@@ -866,6 +875,269 @@ class SSPDataAcquisitionWindow(Form):
         message += "Connected: " + ("Yes" if self.comm.is_connected else "No")
         
         MessageBox.Show(message, "Setup Values", MessageBoxButtons.OK, MessageBoxIcon.Information)
+    
+    def _on_filter_bar_setup(self, sender, event):
+        """Handle Filter Bar Setup menu item."""
+        # Get current filter bar configuration
+        filter_bars = self.config.get('filter_bars', [
+            ['U', 'B', 'V', 'R', 'I', 'Dark'],
+            ['u', 'g', 'r', 'i', 'z', 'Y'],
+            ['f13', 'f14', 'f15', 'f16', 'f17', 'f18']
+        ])
+        active_bar = self.config.get('active_filter_bar', 1)
+        
+        # Show filter bar setup dialog
+        dialog = ssp_dialogs.FilterBarSetupDialog(filter_bars, active_bar)
+        
+        if dialog.ShowDialog() == DialogResult.OK:
+            # Save changes
+            self.config.set('filter_bars', dialog.filter_bars)
+            self.config.set('active_filter_bar', dialog.active_bar)
+            self.config.save()
+            
+            # Update filter combo box with new active bar
+            self._update_filter_combo()
+            
+            self._update_status("Filter bar configuration saved")
+    
+    def _on_auto_manual_filters(self, sender, event):
+        """Handle Auto/Manual Filters menu item."""
+        current_mode = self.config.get('auto_manual', 'M')
+        
+        # Show dialog with current mode
+        current_text = "Auto (6-position slider)" if current_mode == 'A' else "Manual (2-position slider)"
+        
+        message = "Current mode: " + current_text + "\n\n"
+        message += "Select filter mode:\n\n"
+        message += "Yes = Auto Filters (6-position slider)\n"
+        message += "No = Manual Filters (2-position slider)"
+        
+        result = MessageBox.Show(message, "Auto/Manual Filter Mode", 
+                                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question)
+        
+        if result == DialogResult.Yes:
+            self._set_auto_manual('A')
+        elif result == DialogResult.No:
+            self._set_auto_manual('M')
+        # Cancel = do nothing
+    
+    def _set_auto_manual(self, mode):
+        """Set auto/manual filter mode."""
+        # If switching to Auto mode, show hardware requirement warning
+        if mode == 'A':
+            warning_msg = "Auto filter mode requires an SSP photometer with a 6-position automated filter slider.\n\n"
+            warning_msg += "Do you have this hardware installed?\n\n"
+            warning_msg += "YES = I have automated filter slider hardware\n"
+            warning_msg += "NO = I only have manual 2-position slider\n\n"
+            warning_msg += "Note: If you select YES but don't have the hardware, the SSP will appear to\n"
+            warning_msg += "respond to filter commands but no physical filter movement will occur."
+            
+            result = MessageBox.Show(warning_msg, "Auto Filter Hardware Check",
+                                   MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+            
+            if result != DialogResult.Yes:
+                self._update_status("Auto filter mode cancelled - no hardware")
+                return
+        
+        self.config.set('auto_manual', mode)
+        self.config.save()
+        
+        if mode == 'A':
+            self._update_status("Set for auto 6-position filter slider")
+            MessageBox.Show("Filter mode set to: Auto (6-position slider)\n\n" +
+                          "The SSP will automatically move the filter slider when you change filters.",
+                          "Auto Filter Mode", MessageBoxButtons.OK, MessageBoxIcon.Information)
+        else:
+            self._update_status("Set for manual 2-position slider")
+            MessageBox.Show("Filter mode set to: Manual (2-position slider)\n\n" +
+                          "You will need to manually change filters when prompted.",
+                          "Manual Filter Mode", MessageBoxButtons.OK, MessageBoxIcon.Information)
+    
+    def _update_filter_combo(self):
+        """Update filter combo box with filters from active bar."""
+        active_bar = self.config.get('active_filter_bar', 1)
+        filter_bars = self.config.get('filter_bars', [
+            ['U', 'B', 'V', 'R', 'I', 'Dark'],
+            ['u', 'g', 'r', 'i', 'z', 'Y'],
+            ['f13', 'f14', 'f15', 'f16', 'f17', 'f18']
+        ])
+        
+        # Get filters for active bar
+        bar_index = active_bar - 1
+        if bar_index < len(filter_bars):
+            filters = filter_bars[bar_index]
+        else:
+            filters = ['U', 'B', 'V', 'R', 'I', 'Dark']
+        
+        # Save current selection if any
+        current_selection = self.filter_combo.Text if self.filter_combo.SelectedIndex >= 0 else ""
+        
+        # Suspend event handling during update to prevent recursion
+        self.updating_filter_combo = True
+        
+        # Update combo box
+        self.filter_combo.Items.Clear()
+        for f in filters:
+            self.filter_combo.Items.Add(f)
+        
+        # Always add "Home" option (works only in auto mode, but always available)
+        self.filter_combo.Items.Add("Home")
+        
+        # Restore selection or select first item
+        if current_selection and (current_selection in filters or current_selection == "Home"):
+            self.filter_combo.Text = current_selection
+        elif len(filters) > 0:
+            self.filter_combo.SelectedIndex = 0
+        
+        # Resume event handling
+        self.updating_filter_combo = False
+    
+    def _on_filter_changed(self, sender, event):
+        """Handle filter selection change.
+        
+        Implements [SELECT_FILTER.Click] from SSPDataq (lines 1476-1545).
+        In Auto mode: sends SHNNN (home) or SFNNn (select) commands to SSP.
+        In Manual mode: displays message to manually change filter.
+        """
+        # Prevent recursion when programmatically updating combo
+        if self.updating_filter_combo:
+            return
+        
+        print("\n" + "="*60)
+        print("FILTER SELECTION EVENT")
+        print("="*60)
+        
+        if self.filter_combo.SelectedIndex < 0:
+            print("No filter selected (index < 0)")
+            return
+        
+        filter_selection = self.filter_combo.Text
+        auto_manual = self.config.get('auto_manual', 'M')
+        
+        print("User selected: " + filter_selection)
+        print("Mode: " + ("Automated" if auto_manual == 'A' else "Manual"))
+        print("Combo index: " + str(self.filter_combo.SelectedIndex))
+        print("Connection status: " + ("Connected" if self.comm.is_connected else "Not connected"))
+        
+        # Check if "Home" selected in Manual mode (error condition)
+        if auto_manual == 'M' and filter_selection == "Home":
+            print("ERROR: Home command not allowed in Manual mode")
+            MessageBox.Show("Home is for auto-filter option", "Filter Selection",
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            self._update_status("Home is for auto-filter option")
+            # Reset selection to first filter (prevent recursion)
+            self.updating_filter_combo = True
+            self.filter_combo.SelectedIndex = 0
+            self.updating_filter_combo = False
+            print("="*60 + "\n")
+            return
+        
+        # Handle filter selection in Manual mode (not Home)
+        if auto_manual == 'M':
+            print("Manual mode: Displaying instruction to user")
+            message = "Place filter " + filter_selection + " in position"
+            print("Status message: " + message)
+            self._update_status(message)
+            print("="*60 + "\n")
+            return
+        
+        # From here on, we're in Auto mode
+        print("Automated mode: Will send serial command to SSP")
+        
+        # Handle Home command in Auto mode
+        if filter_selection == "Home":
+            print("Processing Home command...")
+            if not self.comm.is_connected:
+                print("ERROR: Port not open")
+                MessageBox.Show("Port not open - please connect", "Filter Control",
+                              MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                self._update_status("Port not open - please connect")
+                self.updating_filter_combo = True
+                self.filter_combo.SelectedIndex = 0
+                self.updating_filter_combo = False
+                print("="*60 + "\n")
+                return
+            
+            print("Calling comm.home_filter()...")
+            self._update_status("Filter slider going to position 1")
+            success, retry_count, message = self.comm.home_filter()
+            
+            print("Home result: success=" + str(success) + ", retries=" + str(retry_count) + ", msg=" + message)
+            
+            if success:
+                # Get filter name for position 1
+                filter_bars = self.config.get('filter_bars', [])
+                active_bar = self.config.get('active_filter_bar', 1) - 1
+                if active_bar < len(filter_bars) and len(filter_bars[active_bar]) > 0:
+                    filter_name = filter_bars[active_bar][0]
+                else:
+                    filter_name = "f1"
+                
+                status_msg = "Filter " + filter_name + " is in position"
+                print("SUCCESS: " + status_msg)
+                self._update_status(status_msg)
+                # Don't change combo selection - leave it on "Home" to show what was done
+            else:
+                print("FAILED: " + message)
+                self._update_status("Problem with SSP communication - no Ack received")
+                error_msg = "No acknowledgment received after 3 attempts.\n\n"
+                error_msg += "Possible causes:\n"
+                error_msg += "1. SSP hardware does not have automated filter slider\n"
+                error_msg += "2. Filter hardware not connected or powered\n"
+                error_msg += "3. Communication cable issue\n\n"
+                error_msg += "If your SSP does not have automated filters,\n"
+                error_msg += "use Setup -> Auto/Manual Filters to select Manual mode."
+                MessageBox.Show(error_msg, "Filter Control Error",
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+            print("="*60 + "\n")
+            return
+        
+        # Handle filter selection in Auto mode (positions 1-6)
+        print("Processing filter selection in Auto mode...")
+        
+        if not self.comm.is_connected:
+            print("ERROR: Port not open")
+            MessageBox.Show("Port not open - please connect", "Filter Control",
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            self._update_status("Port not open - please connect")
+            self.updating_filter_combo = True
+            self.filter_combo.SelectedIndex = 0
+            self.updating_filter_combo = False
+            print("="*60 + "\n")
+            return
+        
+        # Get filter position (1-6) from combo index
+        filter_position = self.filter_combo.SelectedIndex + 1
+        print("Filter position: " + str(filter_position) + " (index + 1)")
+        
+        # Ensure valid filter position
+        if filter_position >= 1 and filter_position <= 6:
+            print("Calling comm.select_filter(" + str(filter_position) + ")...")
+            self._update_status("Filter slider moving to position " + str(filter_position))
+            success, retry_count, message = self.comm.select_filter(filter_position)
+            
+            print("Select result: success=" + str(success) + ", retries=" + str(retry_count) + ", msg=" + message)
+            
+            if success:
+                status_msg = "Filter " + filter_selection + " is in position"
+                print("SUCCESS: " + status_msg)
+                self._update_status(status_msg)
+            else:
+                print("FAILED: " + message)
+                self._update_status("Problem with SSP communication - no Ack received")
+                error_msg = "No acknowledgment received after 3 attempts.\n\n"
+                error_msg += "Possible causes:\n"
+                error_msg += "1. SSP hardware does not have automated filter slider\n"
+                error_msg += "2. Filter hardware not connected or powered\n"
+                error_msg += "3. Communication cable issue\n\n"
+                error_msg += "If your SSP does not have automated filters,\n"
+                error_msg += "use Setup -> Auto/Manual Filters to select Manual mode."
+                MessageBox.Show(error_msg, "Filter Control Error",
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+        else:
+            print("ERROR: Invalid filter position " + str(filter_position) + " (out of range 1-6)")
+        
+        print("="*60 + "\n")
     
     def _on_start(self, sender, event):
         """Handle START button click.
@@ -1591,12 +1863,19 @@ class StarSelectionDialog(Form):
         self.Close()
 
 
-def show_data_acquisition_window(sharpcap=None, coordinate_parser=None):
+def show_data_acquisition_window(sharpcap=None, coordinate_parser=None, on_close_callback=None):
     """Show the data acquisition window.
     
     Args:
         sharpcap: SharpCap object if running in SharpCap, None if standalone
         coordinate_parser: CoordinateParser class if running in SharpCap, None if standalone
+        on_close_callback: Optional callback function to call when window closes
     """
     window = SSPDataAcquisitionWindow(sharpcap=sharpcap, coordinate_parser=coordinate_parser)
-    window.ShowDialog()
+    
+    # If a close callback is provided, subscribe to the FormClosed event
+    if on_close_callback:
+        window.FormClosed += lambda sender, event: on_close_callback()
+    
+    # Use Show() instead of ShowDialog() to keep SharpCap interface responsive
+    window.Show()

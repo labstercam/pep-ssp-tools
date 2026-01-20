@@ -6,7 +6,7 @@ Handles serial communication with SSP photometer.
 Implements the SSP-3a/SSP-5a serial protocol.
 
 Author: pep-ssp-tools project
-Version: 0.1.0
+Version: 0.1.2
 """
 
 import clr
@@ -246,35 +246,147 @@ class SSPCommunicator:
     def home_filter(self):
         """Home the filter bar (automatic filter mode).
         
-        Sends "SHNNN" command and waits for "!" acknowledgment.
+        Implements SHNNN command from SSPDataq (lines 1493-1515).
+        Sends "SHNNN" command and waits for "!" acknowledgment with 3 retries.
         
         Returns:
-            tuple: (success: bool, message: str)
+            tuple: (success: bool, retry_count: int, message: str)
         """
-        if not self.is_connected:
-            return (False, "Not connected")
+        print("\n=== FILTER HOME COMMAND ===")
+        print("Connection status: " + ("Connected" if self.is_connected else "Not connected"))
         
-        try:
-            self._clear_buffer()
-            self._write("SHNNN")
-            
-            # Wait for acknowledgment (up to 5 seconds)
-            ack_received = False
-            for i in range(100):
-                time.sleep(0.05)  # 50ms pause
-                if self.port.BytesToRead > 0:
-                    response = self._read_available()
-                    if "!" in response:
-                        ack_received = True
-                        break
-            
-            if ack_received:
-                return (True, "Filter bar homed")
-            else:
-                return (False, "No acknowledgment received")
+        if not self.is_connected:
+            print("ERROR: Cannot home filter - not connected to SSP")
+            return (False, 0, "Not connected")
+        
+        if self.port:
+            print("COM Port: " + self.port.PortName)
+            print("Port open: " + str(self.port.IsOpen))
+        
+        # Retry up to 3 times if no acknowledgment
+        for retry in range(3):
+            print("\nAttempt " + str(retry + 1) + " of 3:")
+            try:
+                print("  Clearing serial buffer...")
+                self._clear_buffer()
                 
-        except Exception as e:
-            return (False, "Error homing filter: " + str(e))
+                print("  Sending command: SHNNN")
+                self._write("SHNNN")
+                
+                # Wait for acknowledgment (up to 5 seconds)
+                print("  Waiting for acknowledgment (up to 5 seconds)...")
+                ack_received = False
+                for i in range(100):
+                    time.sleep(0.05)  # 50ms pause
+                    if self.port.BytesToRead > 0:
+                        response = self._read_available()
+                        print("  Received: '" + response + "'")
+                        if "!" in response:
+                            ack_received = True
+                            print("  SUCCESS: Acknowledgment received!")
+                            break
+                
+                if ack_received:
+                    print("Filter bar successfully homed (attempt " + str(retry + 1) + ")")
+                    print("=" * 30)
+                    return (True, retry, "Filter bar homed")
+                else:
+                    print("  WARNING: No acknowledgment received")
+                    # No ack, will retry unless this was the last attempt
+                    if retry < 2:
+                        print("  Pausing 2 seconds before retry...")
+                        time.sleep(2.0)  # 2 second pause before retry
+                    else:
+                        print("  All retries exhausted")
+                    
+            except Exception as e:
+                print("  EXCEPTION: " + str(e))
+                print("=" * 30)
+                return (False, retry, "Error homing filter: " + str(e))
+        
+        # All retries failed
+        print("FAILED: No acknowledgment received after 3 attempts")
+        print("=" * 30)
+        return (False, 3, "No acknowledgment received after 3 attempts")
+    
+    def select_filter(self, filter_number):
+        """Select filter position (automatic filter mode).
+        
+        Implements SFNNN command from SSPDataq (lines 1520-1543).
+        Sends "SFNNNn" command where n is 1-6 for filter position.
+        Waits for "!" acknowledgment with 3 retries.
+        
+        Args:
+            filter_number: Filter position (1-6)
+            
+        Returns:
+            tuple: (success: bool, retry_count: int, message: str)
+        """
+        print("\n=== FILTER SELECT COMMAND ===")
+        print("Requested position: " + str(filter_number))
+        print("Connection status: " + ("Connected" if self.is_connected else "Not connected"))
+        
+        if not self.is_connected:
+            print("ERROR: Cannot select filter - not connected to SSP")
+            return (False, 0, "Not connected")
+        
+        if filter_number < 1 or filter_number > 6:
+            print("ERROR: Invalid filter number (must be 1-6)")
+            return (False, 0, "Invalid filter number. Must be 1-6")
+        
+        if self.port:
+            print("COM Port: " + self.port.PortName)
+            print("Port open: " + str(self.port.IsOpen))
+        
+        # Retry up to 3 times if no acknowledgment
+        for retry in range(3):
+            print("\nAttempt " + str(retry + 1) + " of 3:")
+            try:
+                print("  Clearing serial buffer...")
+                self._clear_buffer()
+                
+                print("  Pausing 10ms...")
+                time.sleep(0.01)  # 10ms pause (matches original "call Pause 10")
+                
+                command = "SFNNN" + str(filter_number)
+                print("  Sending command: " + command)
+                self._write(command)
+                
+                # Wait for acknowledgment (up to 5 seconds)
+                print("  Waiting for acknowledgment (up to 5 seconds)...")
+                ack_received = False
+                for i in range(100):
+                    time.sleep(0.05)  # 50ms pause
+                    if self.port.BytesToRead > 0:
+                        response = self._read_available()
+                        print("  Received: '" + response + "'")
+                        if "!" in response:
+                            ack_received = True
+                            print("  SUCCESS: Acknowledgment received!")
+                            break
+                
+                if ack_received:
+                    print("Filter " + str(filter_number) + " successfully selected (attempt " + str(retry + 1) + ")")
+                    print("=" * 30)
+                    return (True, retry, "Filter " + str(filter_number) + " selected")
+                else:
+                    print("  WARNING: No acknowledgment received")
+                    # No ack, will retry unless this was the last attempt
+                    if retry < 2:
+                        print("  Pausing 2 seconds before retry...")
+                        time.sleep(2.0)  # 2 second pause before retry
+                    else:
+                        print("  All retries exhausted")
+                    
+            except Exception as e:
+                print("  EXCEPTION: " + str(e))
+                print("=" * 30)
+                return (False, retry, "Error selecting filter: " + str(e))
+        
+        # All retries failed
+        print("FAILED: No acknowledgment received after 3 attempts")
+        print("=" * 30)
+        return (False, 3, "No acknowledgment received after 3 attempts")
     
     def _write(self, data):
         """Write data to serial port.
