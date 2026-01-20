@@ -12,6 +12,7 @@ Version: 0.1.2
 import clr
 import sys
 import time
+import math
 
 # Ensure module path is accessible
 import System
@@ -66,6 +67,11 @@ class SSPDataAcquisitionWindow(Form):
         self.catalog = None
         self._load_star_catalog()
         
+        # Initialize extinction star catalog
+        self.extinction_catalog = None
+        self._load_extinction_catalog()
+        self.last_extinction_filter = None  # Track last used extinction filter
+        
         # Store SharpCap object and CoordinateParser (passed from main.py)
         self.SharpCap = sharpcap
         self.CoordinateParser = coordinate_parser
@@ -98,8 +104,8 @@ class SSPDataAcquisitionWindow(Form):
         # Setup window
         self.Text = "SSP Data Acquisition Program Version 3"
         self.Width = 1100
-        self.Height = 345
-        self.MinimumSize = Size(1100, 345)  # Prevent shrinking below original size
+        self.Height = 450
+        self.MinimumSize = Size(1100, 450)  # Prevent shrinking below original size
         self.StartPosition = FormStartPosition.CenterScreen
         self.FormBorderStyle = FormBorderStyle.Sizable  # Allow resizing
         self.MaximizeBox = True  # Enable maximize button
@@ -211,6 +217,12 @@ class SSPDataAcquisitionWindow(Form):
         select_star_item.Click += self._on_select_star
         catalog_menu.DropDownItems.Add(select_star_item)
         
+        select_extinction_item = ToolStripMenuItem("Select 1st Order Ext")
+        select_extinction_item.Click += self._on_select_extinction_star
+        catalog_menu.DropDownItems.Add(select_extinction_item)
+        
+        catalog_menu.DropDownItems.Add(ToolStripSeparator())
+        
         reload_catalog_item = ToolStripMenuItem("Reload Catalog")
         reload_catalog_item.Click += self._on_reload_catalog
         catalog_menu.DropDownItems.Add(reload_catalog_item)
@@ -236,7 +248,7 @@ class SSPDataAcquisitionWindow(Form):
         self.Controls.Add(filter_label)
         
         self.filter_combo = ComboBox()
-        self.filter_combo.Location = Point(x, y + 20)
+        self.filter_combo.Location = Point(x, y + 25)
         self.filter_combo.Size = Size(80, 25)
         self.filter_combo.DropDownStyle = ComboBoxStyle.DropDownList
         self.filter_combo.SelectedIndexChanged += self._on_filter_changed
@@ -253,7 +265,7 @@ class SSPDataAcquisitionWindow(Form):
         gain_label.Size = Size(70, 20)
         self.Controls.Add(gain_label)
         self.gain_combo = ComboBox()
-        self.gain_combo.Location = Point(x, y + 20)
+        self.gain_combo.Location = Point(x, y + 25)
         self.gain_combo.Size = Size(70, 25)
         self.gain_combo.DropDownStyle = ComboBoxStyle.DropDownList
         self.gain_combo.Items.Add("1")
@@ -272,7 +284,7 @@ class SSPDataAcquisitionWindow(Form):
         self.Controls.Add(integ_label)
         
         self.integ_combo = ComboBox()
-        self.integ_combo.Location = Point(x, y + 20)
+        self.integ_combo.Location = Point(x, y + 25)
         self.integ_combo.Size = Size(80, 25)
         self.integ_combo.DropDownStyle = ComboBoxStyle.DropDownList
         self.integ_combo.Items.Add("0.02")  # SSP-5 only, very fast mode
@@ -294,7 +306,7 @@ class SSPDataAcquisitionWindow(Form):
         interval_label.Size = Size(70, 20)
         self.Controls.Add(interval_label)
         self.interval_combo = ComboBox()
-        self.interval_combo.Location = Point(x, y + 20)
+        self.interval_combo.Location = Point(x, y + 25)
         self.interval_combo.Size = Size(70, 25)
         self.interval_combo.DropDownStyle = ComboBoxStyle.DropDownList
         self.interval_combo.Items.Add("1")    # slow mode only
@@ -318,7 +330,7 @@ class SSPDataAcquisitionWindow(Form):
         self.Controls.Add(mode_label)
         
         self.mode_combo = ComboBox()
-        self.mode_combo.Location = Point(x, y + 20)
+        self.mode_combo.Location = Point(x, y + 25)
         self.mode_combo.Size = Size(80, 25)
         self.mode_combo.DropDownStyle = ComboBoxStyle.DropDownList
         self.mode_combo.Items.Add("trial")
@@ -364,7 +376,7 @@ class SSPDataAcquisitionWindow(Form):
         object_label.Size = Size(150, 20)
         self.Controls.Add(object_label)
         self.object_combo = ComboBox()
-        self.object_combo.Location = Point(x, y + 20)
+        self.object_combo.Location = Point(x, y + 25)
         self.object_combo.Size = Size(150, 25)
         self.object_combo.DropDownStyle = ComboBoxStyle.DropDownList
         self.object_combo.Items.Add("New Object")
@@ -385,7 +397,7 @@ class SSPDataAcquisitionWindow(Form):
         self.Controls.Add(catalog_label)
         
         self.catalog_combo = ComboBox()
-        self.catalog_combo.Location = Point(x, y + 20)
+        self.catalog_combo.Location = Point(x, y + 25)
         self.catalog_combo.Size = Size(100, 25)
         self.catalog_combo.DropDownStyle = ComboBoxStyle.DropDownList
         self.catalog_combo.Items.Add("Astar")
@@ -401,33 +413,33 @@ class SSPDataAcquisitionWindow(Form):
         
         # Current target label (shows selected var/comp/check)
         x = 10
-        y = y + 50
+        y = y + 60
         self.current_target_label = Label()
         self.current_target_label.Text = "No target selected - Use Catalog > Select Target Star"
         self.current_target_label.Location = Point(x, y)
-        self.current_target_label.Size = Size(800, 20)
+        self.current_target_label.Size = Size(800, 25)
         self.current_target_label.ForeColor = Color.Gray
         self.current_target_label.Font = Font("Arial", 9, FontStyle.Italic)
         self.Controls.Add(self.current_target_label)
         
-        # START button
+        # START button - align with Object/Catalog dropdowns
         x = 300
-        y = y_offset + 80
+        y = y_offset + 80  # Same as dropdown row
         self.start_button = Button()
         self.start_button.Text = "START"
-        self.start_button.Location = Point(x, y + 20)
+        self.start_button.Location = Point(x, y + 25)  # Align with combobox position
         self.start_button.Size = Size(100, 30)
         self.start_button.Click += self._on_start
         self.Controls.Add(self.start_button)
         
         # Status/Message area
-        y = y_offset + 140
+        y = y_offset + 170
         x = 10
         
         status_label = Label()
         status_label.Text = "Status:"
         status_label.Location = Point(x, y)
-        status_label.Size = Size(820, 20)
+        status_label.Size = Size(820, 25)
         self.Controls.Add(status_label)
         self.status_text = TextBox()
         self.status_text.Location = Point(x, y + 20)
@@ -437,24 +449,24 @@ class SSPDataAcquisitionWindow(Form):
         self.Controls.Add(self.status_text)
         
         # Data display grid
-        y = y_offset + 175
+        y = y_offset + 215
         data_label = Label()
         data_label.Text = "Data:"
         data_label.Location = Point(x, y)
-        data_label.Size = Size(1060, 20)
+        data_label.Size = Size(1060, 25)
         self.Controls.Add(data_label)
         
         # Fixed column header (doesn't scroll)
         self.header_label = Label()
         self.header_label.Text = "DATE       TIME     C    OBJECT          F  COUNT  COUNT  COUNT  COUNT  IT GN NOTES"
-        self.header_label.Location = Point(x, y + 20)
+        self.header_label.Location = Point(x, y + 28)
         self.header_label.Size = Size(1060, 15)
         self.header_label.Font = Font("Courier New", 8)
         self.header_label.BackColor = Color.LightGray
         self.Controls.Add(self.header_label)
         
         self.data_listbox = ListBox()
-        self.data_listbox.Location = Point(x, y + 35)
+        self.data_listbox.Location = Point(x, y + 46)
         self.data_listbox.Size = Size(1060, 65)
         self.data_listbox.Font = Font("Courier New", 8)
         self.data_listbox.HorizontalScrollbar = True
@@ -842,6 +854,7 @@ class SSPDataAcquisitionWindow(Form):
         """Handle Select SSP COM Port menu item."""
         current_port = self.config.get('com_port', 0)
         dialog = ssp_dialogs.COMPortDialog(current_port)
+        self.night_mode.apply_to_form(dialog)
         
         if dialog.ShowDialog() == DialogResult.OK:
             self.config.set('com_port', dialog.selected_port)
@@ -852,7 +865,7 @@ class SSPDataAcquisitionWindow(Form):
         """Handle Night/Day Screen menu item."""
         current = self.config.get('night_flag', 0)
         if current == 0:
-            result = MessageBox.Show("Set screen for night red?", "Night Mode", 
+            result = MessageBox.Show("Set to Night Mode?", "Night Mode", 
                                     MessageBoxButtons.YesNo, MessageBoxIcon.Question)
             if result == DialogResult.Yes:
                 self.config.set('night_flag', 1)
@@ -894,6 +907,7 @@ class SSPDataAcquisitionWindow(Form):
         
         # Show filter bar setup dialog
         dialog = ssp_dialogs.FilterBarSetupDialog(filter_bars, active_bar)
+        self.night_mode.apply_to_form(dialog)
         
         if dialog.ShowDialog() == DialogResult.OK:
             # Save changes
@@ -965,15 +979,18 @@ class SSPDataAcquisitionWindow(Form):
         current_lat = self.config.get('observer_latitude', 0.0)
         current_lon = self.config.get('observer_longitude', 0.0)
         current_elev = self.config.get('observer_elevation', 0.0)
+        current_city = self.config.get('observer_city', '')
         
         # Show location dialog
-        dialog = ssp_dialogs.LocationDialog(current_lat, current_lon, current_elev)
+        dialog = ssp_dialogs.LocationDialog(current_lat, current_lon, current_elev, current_city)
+        self.night_mode.apply_to_form(dialog)
         
         if dialog.ShowDialog() == DialogResult.OK:
             # Save changes
             self.config.set('observer_latitude', dialog.latitude)
             self.config.set('observer_longitude', dialog.longitude)
             self.config.set('observer_elevation', dialog.elevation)
+            self.config.set('observer_city', dialog.city)
             self.config.save()
             
             # Format location for status message
@@ -1385,14 +1402,48 @@ class SSPDataAcquisitionWindow(Form):
             print(traceback.format_exc())
             self.catalog = None
     
+    def _load_extinction_catalog(self):
+        """Load the first order extinction star catalog from CSV file."""
+        import os
+        import ssp_extinction
+        
+        # Get script directory
+        try:
+            catalog_dir = script_dir
+        except NameError:
+            import System
+            catalog_dir = System.IO.Directory.GetCurrentDirectory()
+        
+        csv_path = os.path.join(catalog_dir, "first_order_extinction_stars.csv")
+        
+        if not os.path.exists(csv_path):
+            print("Warning: Extinction catalog not found at: " + csv_path)
+            self.extinction_catalog = None
+            return
+        
+        try:
+            self.extinction_catalog = ssp_extinction.ExtinctionCatalog()
+            count = self.extinction_catalog.load_from_csv(csv_path)
+            print("Extinction catalog loaded: %d stars" % len(self.extinction_catalog))
+        except Exception as e:
+            import traceback
+            print("Error loading extinction catalog: " + str(e))
+            print(traceback.format_exc())
+            self.extinction_catalog = None
+    
     def _on_reload_catalog(self, sender, event):
         """Handle reload catalog menu click."""
         self._load_star_catalog()
-        if self.catalog:
-            MessageBox.Show("Catalog reloaded successfully.\n%d targets loaded." % self.catalog.get_count(),
-                          "Catalog Reloaded", MessageBoxButtons.OK, MessageBoxIcon.Information)
+        self._load_extinction_catalog()
+        
+        catalog_count = self.catalog.get_count() if self.catalog else 0
+        extinction_count = len(self.extinction_catalog) if self.extinction_catalog else 0
+        
+        if self.catalog or self.extinction_catalog:
+            MessageBox.Show("Catalogs reloaded successfully.\nTarget stars: %d\nExtinction stars: %d" % (catalog_count, extinction_count),
+                          "Catalogs Reloaded", MessageBoxButtons.OK, MessageBoxIcon.Information)
         else:
-            MessageBox.Show("Failed to reload catalog.\nCheck that starparm_latest.csv is in the Python folder.",
+            MessageBox.Show("Failed to reload catalogs.\nCheck that CSV files are in the Python folder.",
                           "Catalog Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
     
     def _on_select_star(self, sender, event):
@@ -1403,7 +1454,8 @@ class SSPDataAcquisitionWindow(Form):
             return
         
         # Create star selection dialog
-        dialog = StarSelectionDialog(self.catalog)
+        dialog = StarSelectionDialog(self.catalog, self.config)
+        self.night_mode.apply_to_form(dialog)
         result = dialog.ShowDialog(self)
         
         if result == DialogResult.OK and dialog.selected_target:
@@ -1500,6 +1552,85 @@ class SSPDataAcquisitionWindow(Form):
                     if str(self.catalog_combo.Items[i]) == "Q'check":
                         self.catalog_combo.SelectedIndex = i
                         break
+    
+    def _on_select_extinction_star(self, sender, event):
+        """Handle select extinction star menu click."""
+        if not self.extinction_catalog or len(self.extinction_catalog) == 0:
+            MessageBox.Show("No extinction catalog loaded.\n\nPlace 'first_order_extinction_stars.csv' in the Python folder and use Catalog > Reload Catalog.",
+                          "No Catalog", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        
+        # Create extinction star selection dialog, passing last filter and parent for night mode
+        dialog = ExtinctionStarSelectionDialog(self.extinction_catalog, self.config, self.last_extinction_filter, self)
+        self.night_mode.apply_to_form(dialog)
+        # Update button highlights after night mode is applied
+        if hasattr(dialog, '_update_button_highlights'):
+            dialog._update_button_highlights()
+        result = dialog.ShowDialog(self)
+        
+        if result == DialogResult.OK and dialog.selected_star:
+            star = dialog.selected_star
+            
+            # Store the used filter for next time
+            self.last_extinction_filter = dialog.used_filter
+            
+            # Create a pseudo-target object for GOTO functionality
+            # We'll use the extinction star as the "variable" and set comp/check to None
+            from ssp_catalog import TargetTriple, StarData
+            
+            # Convert decimal RA/Dec to hours/minutes/seconds format
+            ra_hours_int = int(star.ra_hours)
+            ra_minutes_float = (star.ra_hours - ra_hours_int) * 60.0
+            ra_minutes_int = int(ra_minutes_float)
+            ra_seconds = (ra_minutes_float - ra_minutes_int) * 60.0
+            
+            # Convert decimal Dec to degrees/minutes/seconds format
+            dec_sign = 1 if star.dec_deg >= 0 else -1
+            dec_abs = abs(star.dec_deg)
+            dec_degrees_int = int(dec_abs) * dec_sign
+            dec_minutes_float = (dec_abs - int(dec_abs)) * 60.0
+            dec_minutes_int = int(dec_minutes_float)
+            dec_seconds = (dec_minutes_float - dec_minutes_int) * 60.0
+            
+            # Create a StarData object from the extinction star data
+            pseudo_var = StarData(
+                name=star.name,
+                ra_hours=ra_hours_int,
+                ra_minutes=ra_minutes_int,
+                ra_seconds=ra_seconds,
+                dec_degrees=dec_degrees_int,
+                dec_minutes=dec_minutes_int,
+                dec_seconds=dec_seconds,
+                vmag=star.v_mag,
+                bv_color=star.b_v
+            )
+            
+            # Create pseudo target with only variable set
+            self.current_target = TargetTriple(variable=pseudo_var, comparison=None, check=None)
+            
+            # Enable GOTO button if in SharpCap mode
+            if self.sharpcap_available and hasattr(self, 'goto_button'):
+                self.goto_button.Enabled = True
+            
+            # Update the current target label
+            airmass_str = "Airmass=%.2f" % dialog.selected_airmass if dialog.selected_airmass else "Airmass=N/A"
+            self.current_target_label.Text = "Current Target (Extinction): %s (V=%.2f, %s)" % (
+                star.name, star.v_mag, airmass_str)
+            self.current_target_label.ForeColor = Color.DarkBlue
+            self.current_target_label.Font = Font("Arial", 9, FontStyle.Bold)
+            
+            # Since extinction stars don't have comp/check, clear the object combo
+            self.updating_filter_combo = True
+            self.object_combo.Items.Clear()
+            self.object_combo.Items.Add(star.name)
+            self.object_combo.SelectedIndex = 0
+            self.updating_filter_combo = False
+            
+            # Set catalog combo to "Foe" for first order extinction
+            for i in range(self.catalog_combo.Items.Count):
+                if str(self.catalog_combo.Items[i]) == "Foe":
+                    self.catalog_combo.SelectedIndex = i
+                    break
     
     def _on_goto_target(self, sender, event):
         """Handle GOTO button click - slew telescope to selected star."""
@@ -1628,23 +1759,58 @@ class SSPDataAcquisitionWindow(Form):
 class StarSelectionDialog(Form):
     """Dialog for selecting stars from catalog."""
     
-    def __init__(self, catalog):
+    def __init__(self, catalog, config=None):
         """
         Initialize star selection dialog.
         
         Args:
             catalog: StarCatalog object
+            config: SSPConfig object (optional, for observer location)
         """
         self.catalog = catalog
+        self.config = config
         self.selected_target = None
         
         self.Text = "Select Target Star"
-        self.Width = 800
+        self.Width = 900
         self.Height = 600
         self.StartPosition = FormStartPosition.CenterParent
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
         self.MinimizeBox = False
+        self.AutoScaleMode = AutoScaleMode.Dpi
+        self.AutoScaleDimensions = System.Drawing.SizeF(96, 96)
+        
+        # Calculate Alt/Az if observer location is available
+        self.alt_az_data = {}
+        if config:
+            # Config stores values in a dictionary, not as attributes
+            lat = config.get('observer_latitude', 0.0)
+            lon = config.get('observer_longitude', 0.0)
+            
+            if lat != 0.0 and lon != 0.0:
+                try:
+                    from datetime import datetime, timezone
+                    import ssp_extinction
+                    
+                    # Use current UTC time
+                    current_time = datetime.now(timezone.utc)
+                    calc = ssp_extinction.AirmassCalculator(lat, lon)
+                    
+                    # Calculate Alt/Az for each star in catalog
+                    for target in catalog.targets:
+                        ra_deg = (target.variable.ra_hours + target.variable.ra_minutes/60.0 + 
+                                  target.variable.ra_seconds/3600.0) * 15.0
+                        dec_deg = target.variable.dec_degrees_decimal
+                        
+                        altitude, azimuth = calc.calculate_altaz(ra_deg, dec_deg, current_time)
+                        self.alt_az_data[target.variable.name] = (altitude, azimuth)
+                        
+                except Exception as ex:
+                    print("Error calculating Alt/Az: %s" % ex)
+                    import traceback
+                    print(traceback.format_exc())
+                    self.alt_az_data = {}
         
         self._setup_ui()
     
@@ -1656,33 +1822,36 @@ class StarSelectionDialog(Form):
         # Search panel at top
         search_panel = Panel()
         search_panel.Dock = DockStyle.Top
-        search_panel.Height = 65
+        search_panel.Height = 75
         search_panel.Padding = Padding(10)
         
         search_label = Label()
         search_label.Text = "Search by name:"
         search_label.Location = Point(10, 15)
-        search_label.Size = Size(100, 20)
+        search_label.Size = Size(110, 25)
+        search_label.BackColor = self.BackColor
         search_panel.Controls.Add(search_label)
         
         self.search_box = TextBox()
-        self.search_box.Location = Point(120, 12)
+        self.search_box.Location = Point(125, 12)
         self.search_box.Size = Size(300, 25)
         self.search_box.TextChanged += self._on_search_changed
         search_panel.Controls.Add(self.search_box)
         
         search_info = Label()
         search_info.Text = "Type to filter star names (e.g., 'ALF', 'CET', 'NSV')"
-        search_info.Location = Point(430, 15)
-        search_info.Size = Size(250, 20)
+        search_info.Location = Point(435, 15)
+        search_info.Size = Size(350, 25)
+        search_info.BackColor = self.BackColor
         search_info.ForeColor = Color.Gray
         search_panel.Controls.Add(search_info)
         
         # Results counter
         self.results_label = Label()
         self.results_label.Text = "All stars (%d)" % self.catalog.get_count()
-        self.results_label.Location = Point(10, 40)
-        self.results_label.Size = Size(700, 18)
+        self.results_label.Location = Point(10, 45)
+        self.results_label.Size = Size(750, 25)
+        self.results_label.BackColor = self.BackColor
         self.results_label.ForeColor = Color.Blue
         self.results_label.Font = Font("Arial", 8, FontStyle.Bold)
         search_panel.Controls.Add(self.results_label)
@@ -1720,15 +1889,94 @@ class StarSelectionDialog(Form):
         self.detail_text.Font = Font("Consolas", 9)
         detail_panel.Controls.Add(self.detail_text)
         
-        # ListBox for stars - fills middle space
-        self.star_list = ListBox()
-        self.star_list.Dock = DockStyle.Fill
-        self.star_list.Font = Font("Consolas", 9)
-        self.star_list.SelectedIndexChanged += self._on_star_selected
-        self.star_list.DoubleClick += self._on_star_double_click
+        # DataGridView for stars - fills middle space
+        self.star_grid = DataGridView()
+        self.star_grid.Dock = DockStyle.Fill
+        self.star_grid.Font = Font("Consolas", 9)
+        self.star_grid.ReadOnly = True
+        self.star_grid.AllowUserToAddRows = False
+        self.star_grid.AllowUserToDeleteRows = False
+        self.star_grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect
+        self.star_grid.MultiSelect = False
+        self.star_grid.RowHeadersVisible = False
+        self.star_grid.SelectionChanged += self._on_star_selected
+        self.star_grid.DoubleClick += self._on_star_double_click
+        
+        # Add columns - use DataGridViewTextBoxColumn for proper creation
+        col_name = DataGridViewTextBoxColumn()
+        col_name.Name = "Name"
+        col_name.HeaderText = "Name"
+        col_name.Width = 150
+        # Use getattr to access None enum member since None is a Python keyword
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_name.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_name)
+        
+        col_vmag = DataGridViewTextBoxColumn()
+        col_vmag.Name = "VMag"
+        col_vmag.HeaderText = "V Mag"
+        col_vmag.Width = 70
+        col_vmag.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_vmag.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_vmag)
+        
+        col_ra = DataGridViewTextBoxColumn()
+        col_ra.Name = "RA"
+        col_ra.HeaderText = "RA"
+        col_ra.Width = 100
+        col_ra.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_ra.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_ra)
+        
+        col_dec = DataGridViewTextBoxColumn()
+        col_dec.Name = "Dec"
+        col_dec.HeaderText = "Dec"
+        col_dec.Width = 100
+        col_dec.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_dec.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_dec)
+        
+        col_alt = DataGridViewTextBoxColumn()
+        col_alt.Name = "Alt"
+        col_alt.HeaderText = "Alt"
+        col_alt.Width = 60
+        col_alt.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_alt.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_alt)
+        
+        col_az = DataGridViewTextBoxColumn()
+        col_az.Name = "Az"
+        col_az.HeaderText = "Az"
+        col_az.Width = 60
+        col_az.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_az.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_az)
         
         # Add controls in this specific order
-        self.Controls.Add(self.star_list)      # Fill - add first
+        self.Controls.Add(self.star_grid)      # Fill - add first
         self.Controls.Add(detail_panel)        # Bottom #1 - add second
         self.Controls.Add(button_panel)        # Bottom #2 - add third
         self.Controls.Add(search_panel)        # Top - add last (appears on top)
@@ -1737,80 +1985,55 @@ class StarSelectionDialog(Form):
         self.ResumeLayout(True)
         self.PerformLayout()
         
-        self.Controls.Add(button_panel)
-        
-        # Populate list
+        # Populate grid
         self._populate_list()
     
     def _populate_list(self, filter_text=""):
-        """Populate the star list with optional filtering."""
-        # Use BeginUpdate/EndUpdate for better performance and reliability
-        self.star_list.BeginUpdate()
-        try:
-            self.star_list.Items.Clear()
-            
-            filter_upper = filter_text.upper().strip()
-            match_count = 0
-            
-            # Build list of matching items first
-            items_to_add = []
-            
-            # DEBUG: Print what we're searching for
-            if filter_upper:
-                print("Searching for: '%s'" % filter_upper)
-            
-            for target in self.catalog.targets:
-                # Get name and normalize whitespace
-                name = target.variable.name.strip()
-                name_upper = name.upper()
-                
-                # Check if filter matches (case-insensitive substring search)
-                if not filter_upper or filter_upper in name_upper:
-                    vmag_str = "%.2f" % target.variable.vmag if target.variable.vmag is not None else "?.??"
-                    display = "%-15s  V=%-5s  RA=%s  Dec=%s" % (
-                        name, vmag_str, 
-                        target.variable.ra_string(), 
-                        target.variable.dec_string())
-                    items_to_add.append(display)
-                    match_count += 1
-                    
-                    # DEBUG: Print first 10 matches
-                    if filter_upper and match_count <= 10:
-                        print("  Match %d: %s" % (match_count, name))
-            
-            # DEBUG: Print total before adding
-            print("Total matches found: %d" % len(items_to_add))
-            
-            # Add all items at once
-            for item in items_to_add:
-                self.star_list.Items.Add(item)
-            
-            # DEBUG: Print what's in the ListBox after adding
-            print("Items in ListBox: %d" % self.star_list.Items.Count)
-            if filter_upper and self.star_list.Items.Count > 0:
-                print("First item in ListBox: %s" % str(self.star_list.Items[0]))
-                if self.star_list.Items.Count > 1:
-                    print("Last item in ListBox: %s" % str(self.star_list.Items[self.star_list.Items.Count - 1]))
-            
-            # Update results label
-            if filter_upper:
-                self.results_label.Text = "Found %d matches for '%s' (showing %d in list)" % (match_count, filter_text, self.star_list.Items.Count)
-                self.results_label.ForeColor = Color.Green if match_count > 0 else Color.Red
-            else:
-                self.results_label.Text = "All stars (%d loaded)" % self.star_list.Items.Count
-                self.results_label.ForeColor = Color.Blue
-            
-            if self.star_list.Items.Count == 0:
-                self.star_list.Items.Add("(No matches found)")
-                
-        finally:
-            self.star_list.EndUpdate()
+        """Populate the star grid with optional filtering."""
+        self.star_grid.Rows.Clear()
         
-        # Reset scroll position to top AFTER EndUpdate
-        if self.star_list.Items.Count > 0:
-            self.star_list.ClearSelected()  # Clear any selection first
-            self.star_list.TopIndex = 0     # Scroll to top
-            self.star_list.SelectedIndex = -1  # Ensure nothing selected
+        filter_upper = filter_text.upper().strip()
+        match_count = 0
+        
+        for target in self.catalog.targets:
+            # Get name and normalize whitespace
+            name = target.variable.name.strip()
+            name_upper = name.upper()
+            
+            # Check if filter matches (case-insensitive substring search)
+            if not filter_upper or filter_upper in name_upper:
+                vmag_str = "%.2f" % target.variable.vmag if target.variable.vmag is not None else "?.??"
+                ra_str = target.variable.ra_string()
+                dec_str = target.variable.dec_string()
+                
+                # Get Alt/Az if calculated
+                if name in self.alt_az_data:
+                    altitude, azimuth = self.alt_az_data[name]
+                    if altitude is not None and altitude >= 0:
+                        alt_str = "%d" % round(altitude)
+                        az_str = "%d" % round(azimuth)
+                    else:
+                        alt_str = "<0"
+                        az_str = "-"
+                else:
+                    # Location not set
+                    alt_str = "?"
+                    az_str = "?"
+                
+                # Add row to grid
+                self.star_grid.Rows.Add(name, vmag_str, ra_str, dec_str, alt_str, az_str)
+                match_count += 1
+        
+        # Update results label
+        if filter_upper:
+            self.results_label.Text = "Found %d matches for '%s'" % (match_count, filter_text)
+            self.results_label.ForeColor = Color.Green if match_count > 0 else Color.Red
+        else:
+            self.results_label.Text = "All stars (%d)" % match_count
+            self.results_label.ForeColor = Color.Blue
+        
+        if self.star_grid.Rows.Count == 0:
+            self.star_grid.Rows.Add("(No matches found)", "", "", "", "", "")
     
     def _on_search_changed(self, sender, event):
         """Handle search text changed."""
@@ -1818,15 +2041,15 @@ class StarSelectionDialog(Form):
     
     def _on_star_selected(self, sender, event):
         """Handle star selection changed."""
-        if self.star_list.SelectedIndex < 0:
+        if self.star_grid.SelectedRows.Count == 0:
             return
         
-        # Get selected star name (first 15 characters, stripped)
-        selected_text = str(self.star_list.SelectedItem)
-        if selected_text.startswith("(No matches"):
-            return
+        # Get selected star name from first column
+        row = self.star_grid.SelectedRows[0]
+        star_name = str(row.Cells[0].Value)
         
-        star_name = selected_text[:15].strip()
+        if star_name.startswith("(No matches"):
+            return
         
         # Find target in catalog
         target = self.catalog.get_target_by_name(star_name)
@@ -1892,6 +2115,429 @@ class StarSelectionDialog(Form):
         """Handle Cancel button click."""
         self.DialogResult = DialogResult.Cancel
         self.Close()
+
+
+class ExtinctionStarSelectionDialog(Form):
+    """Dialog for selecting first order extinction standard stars with airmass filtering."""
+    
+    def __init__(self, extinction_catalog, config=None, last_filter=None, parent=None):
+        """
+        Initialize extinction star selection dialog.
+        
+        Args:
+            extinction_catalog: ExtinctionCatalog object
+            config: SSPConfig object (optional, for observer location)
+            last_filter: Last used airmass filter value (optional)
+            parent: Parent window (for night mode access)
+        """
+        self.extinction_catalog = extinction_catalog
+        self.config = config
+        self.parent = parent
+        self.selected_star = None
+        self.selected_airmass = None
+        self.active_filter = None  # Track active airmass filter
+        self.used_filter = None  # Track which filter was used for selection
+        
+        self.Text = "Select First Order Extinction Star"
+        self.Width = 1100
+        self.Height = 600
+        self.StartPosition = FormStartPosition.CenterParent
+        self.FormBorderStyle = FormBorderStyle.Sizable
+        self.MaximizeBox = True
+        self.MinimizeBox = False
+        self.AutoScaleMode = AutoScaleMode.Dpi
+        self.AutoScaleDimensions = System.Drawing.SizeF(96, 96)
+        
+        # Calculate airmass, altitude, azimuth for all stars if observer location is available
+        self.star_airmass = {}
+        self.star_altitude = {}
+        self.star_azimuth = {}
+        if config:
+            lat = config.get('observer_latitude', 0.0)
+            lon = config.get('observer_longitude', 0.0)
+            
+            if lat != 0.0 and lon != 0.0:
+                try:
+                    from datetime import datetime, timezone
+                    import ssp_extinction
+                    
+                    current_time = datetime.now(timezone.utc)
+                    calc = ssp_extinction.AirmassCalculator(lat, lon)
+                    
+                    for star in extinction_catalog.stars:
+                        altitude, azimuth = calc.calculate_altaz(star.ra_deg, star.dec_deg, current_time)
+                        if altitude is not None and altitude > 0:
+                            # Store altitude and azimuth
+                            self.star_altitude[star.name] = altitude
+                            self.star_azimuth[star.name] = azimuth
+                            
+                            # Calculate airmass using Hardie formula
+                            zenith_angle = 90.0 - altitude
+                            zenith_rad = math.radians(zenith_angle)
+                            airmass = 1.0 / math.cos(zenith_rad) - 0.0018167 * (1.0 / math.cos(zenith_rad) - 1.0)
+                            # Store if reasonable airmass (<= 5)
+                            if airmass <= 5.0:
+                                self.star_airmass[star.name] = airmass
+                except Exception as ex:
+                    print("Error calculating airmass: %s" % ex)
+                    import traceback
+                    print(traceback.format_exc())
+        
+        # Auto-select next filter if a previous filter was used
+        self._auto_select_next_filter(last_filter)
+        
+        self._setup_ui()
+    
+    def _auto_select_next_filter(self, last_filter):
+        """Automatically select the next airmass filter based on last selection.
+        
+        Args:
+            last_filter: The airmass value of the last used filter
+        """
+        if last_filter is None:
+            return
+        
+        # Define available filter values
+        airmass_values = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5]
+        
+        # Find the next filter value
+        try:
+            current_index = airmass_values.index(last_filter)
+            if current_index < len(airmass_values) - 1:
+                # Select next filter in sequence
+                self.active_filter = airmass_values[current_index + 1]
+            else:
+                # At the end, wrap to first
+                self.active_filter = airmass_values[0]
+        except ValueError:
+            # Last filter not in list, don't auto-select
+            pass
+    
+    def _setup_ui(self):
+        """Setup user interface."""
+        self.SuspendLayout()
+        
+        # Top panel for filter buttons
+        filter_panel = Panel()
+        filter_panel.Dock = DockStyle.Top
+        filter_panel.Height = 60
+        filter_panel.BorderStyle = BorderStyle.FixedSingle
+        
+        # Filter label
+        filter_label = Label()
+        filter_label.Text = "Filter by Airmass:"
+        filter_label.Location = Point(10, 10)
+        filter_label.Size = Size(120, 20)
+        filter_label.Font = Font("Arial", 9, FontStyle.Bold)
+        filter_panel.Controls.Add(filter_label)
+        
+        # Filter buttons for airmass ranges
+        x_pos = 10
+        y_pos = 32
+        button_width = 70
+        button_spacing = 5
+        
+        airmass_values = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5]
+        self.filter_buttons = []
+        
+        for am_value in airmass_values:
+            btn = Button()
+            btn.Text = "%.2f" % am_value
+            btn.Location = Point(x_pos, y_pos)
+            btn.Size = Size(button_width, 24)
+            btn.Tag = am_value
+            btn.Click += self._on_filter_button_click
+            filter_panel.Controls.Add(btn)
+            self.filter_buttons.append(btn)
+            x_pos += button_width + button_spacing
+        
+        # Reset filter button
+        reset_btn = Button()
+        reset_btn.Text = "Reset"
+        reset_btn.Location = Point(x_pos + 10, y_pos)
+        reset_btn.Size = Size(80, 24)
+        reset_btn.Click += self._on_reset_filter
+        reset_btn.Font = Font(reset_btn.Font, FontStyle.Bold)
+        filter_panel.Controls.Add(reset_btn)
+        
+        # Bottom panel for buttons
+        button_panel = Panel()
+        button_panel.Dock = DockStyle.Bottom
+        button_panel.Height = 50
+        
+        select_btn = Button()
+        select_btn.Text = "Select"
+        select_btn.Location = Point(self.Width // 2 - 90, 10)
+        select_btn.Size = Size(80, 30)
+        select_btn.Click += self._on_select_click
+        button_panel.Controls.Add(select_btn)
+        
+        cancel_btn = Button()
+        cancel_btn.Text = "Cancel"
+        cancel_btn.Location = Point(self.Width // 2 + 10, 10)
+        cancel_btn.Size = Size(80, 30)
+        cancel_btn.Click += self._on_cancel_click
+        button_panel.Controls.Add(cancel_btn)
+        
+        self.AcceptButton = select_btn
+        self.CancelButton = cancel_btn
+        
+        # DataGridView for stars - fills middle space
+        self.star_grid = DataGridView()
+        self.star_grid.Dock = DockStyle.Fill
+        self.star_grid.Font = Font("Consolas", 9)
+        self.star_grid.ReadOnly = True
+        self.star_grid.AllowUserToAddRows = False
+        self.star_grid.AllowUserToDeleteRows = False
+        self.star_grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect
+        self.star_grid.MultiSelect = False
+        self.star_grid.RowHeadersVisible = False
+        self.star_grid.DoubleClick += self._on_star_double_click
+        
+        # Add columns
+        col_name = DataGridViewTextBoxColumn()
+        col_name.Name = "Name"
+        col_name.HeaderText = "Star Name"
+        col_name.Width = 150
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_name.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_name)
+        
+        col_ra = DataGridViewTextBoxColumn()
+        col_ra.Name = "RA"
+        col_ra.HeaderText = "RA (hours)"
+        col_ra.Width = 100
+        col_ra.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_ra.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_ra)
+        
+        col_dec = DataGridViewTextBoxColumn()
+        col_dec.Name = "Dec"
+        col_dec.HeaderText = "Dec (deg)"
+        col_dec.Width = 100
+        col_dec.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_dec.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_dec)
+        
+        col_vmag = DataGridViewTextBoxColumn()
+        col_vmag.Name = "VMag"
+        col_vmag.HeaderText = "V"
+        col_vmag.Width = 60
+        col_vmag.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_vmag.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_vmag)
+        
+        col_bv = DataGridViewTextBoxColumn()
+        col_bv.Name = "BV"
+        col_bv.HeaderText = "B-V"
+        col_bv.Width = 60
+        col_bv.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_bv.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_bv)
+        
+        col_ub = DataGridViewTextBoxColumn()
+        col_ub.Name = "UB"
+        col_ub.HeaderText = "U-B"
+        col_ub.Width = 60
+        col_ub.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_ub.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_ub)
+        
+        col_airmass = DataGridViewTextBoxColumn()
+        col_airmass.Name = "Airmass"
+        col_airmass.HeaderText = "Airmass"
+        col_airmass.Width = 80
+        col_airmass.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_airmass.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_airmass)
+        
+        col_alt = DataGridViewTextBoxColumn()
+        col_alt.Name = "Alt"
+        col_alt.HeaderText = "Alt"
+        col_alt.Width = 60
+        col_alt.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_alt.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_alt)
+        
+        col_az = DataGridViewTextBoxColumn()
+        col_az.Name = "Az"
+        col_az.HeaderText = "Az"
+        col_az.Width = 60
+        col_az.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight
+        try:
+            none_mode = getattr(DataGridViewAutoSizeColumnMode, 'None')
+            col_az.AutoSizeMode = none_mode
+        except:
+            pass
+        self.star_grid.Columns.Add(col_az)
+        
+        # Add controls in order
+        self.Controls.Add(self.star_grid)      # Fill
+        self.Controls.Add(button_panel)        # Bottom
+        self.Controls.Add(filter_panel)        # Top
+        
+        self.ResumeLayout(True)
+        self.PerformLayout()
+        
+        # Populate grid with auto-selected filter if any
+        self._populate_grid(self.active_filter)
+    
+    def _populate_grid(self, filter_airmass=None):
+        """Populate the grid with extinction stars."""
+        self.star_grid.Rows.Clear()
+        
+        # Create list of (star, airmass) tuples for sorting
+        star_data = []
+        for star in self.extinction_catalog.stars:
+            airmass = self.star_airmass.get(star.name)
+            
+            # Apply filter if active
+            if filter_airmass is not None:
+                if airmass is None:
+                    continue  # Skip stars without airmass
+                if abs(airmass - filter_airmass) > 0.15:
+                    continue  # Outside filter range
+            
+            star_data.append((star, airmass))
+        
+        # Sort by airmass (low to high), putting None values at end
+        star_data.sort(key=lambda x: (x[1] is None, x[1] if x[1] is not None else 999))
+        
+        # Populate grid
+        for star, airmass in star_data:
+            ra_str = "%.4f" % star.ra_hours
+            dec_str = "%+.4f" % star.dec_deg
+            vmag_str = "%.2f" % star.v_mag
+            bv_str = "%.2f" % star.b_v
+            ub_str = "%.2f" % star.u_b
+            airmass_str = "%.2f" % airmass if airmass is not None else ""
+            
+            # Get altitude and azimuth (0 dp format)
+            altitude = self.star_altitude.get(star.name)
+            azimuth = self.star_azimuth.get(star.name)
+            alt_str = "%d" % int(round(altitude)) if altitude is not None else ""
+            az_str = "%d" % int(round(azimuth)) if azimuth is not None else ""
+            
+            row_idx = self.star_grid.Rows.Add(star.name, ra_str, dec_str, vmag_str, bv_str, ub_str, airmass_str, alt_str, az_str)
+            self.star_grid.Rows[row_idx].Tag = star
+        
+        # Update filter button highlights
+        self._update_button_highlights()
+    
+    def _update_button_highlights(self):
+        """Update filter button highlights with night mode awareness."""
+        # Check if night mode is active
+        is_night = self.parent and hasattr(self.parent, 'night_mode') and self.parent.night_mode.is_night_mode
+        
+        for btn in self.filter_buttons:
+            # Use float comparison with small tolerance for button highlighting
+            is_active = (self.active_filter is not None and 
+                        abs(float(btn.Tag) - float(self.active_filter)) < 0.01)
+            
+            if is_active:
+                if is_night:
+                    # Night mode: dark red background with bright red border
+                    btn.BackColor = Color.FromArgb(80, 0, 0)  # Dark red
+                    btn.ForeColor = Color.FromArgb(255, 100, 100)  # Light red text
+                    btn.FlatStyle = FlatStyle.Flat
+                    btn.FlatAppearance.BorderColor = Color.FromArgb(255, 50, 50)  # Bright red border
+                    btn.FlatAppearance.BorderSize = 2
+                else:
+                    # Normal mode: light blue with blue border
+                    btn.BackColor = Color.LightBlue
+                    btn.ForeColor = Color.Black
+                    btn.FlatStyle = FlatStyle.Flat
+                    btn.FlatAppearance.BorderColor = Color.Blue
+                    btn.FlatAppearance.BorderSize = 2
+            else:
+                if is_night:
+                    # Night mode: keep night colors from apply_to_form
+                    btn.BackColor = Color.FromArgb(30, 0, 0)
+                    btn.ForeColor = Color.FromArgb(255, 100, 100)
+                    btn.FlatStyle = FlatStyle.Standard
+                else:
+                    # Normal mode: default colors
+                    btn.BackColor = SystemColors.Control
+                    btn.ForeColor = SystemColors.ControlText
+                    btn.FlatStyle = FlatStyle.Standard
+            btn.Refresh()  # Force visual update
+    
+    def _on_filter_button_click(self, sender, event):
+        """Handle airmass filter button click."""
+        self.active_filter = sender.Tag
+        self.used_filter = sender.Tag  # Track which filter was used
+        self._populate_grid(self.active_filter)
+    
+    def _on_reset_filter(self, sender, event):
+        """Handle reset filter button click."""
+        self.active_filter = None
+        self.used_filter = None  # Clear used filter on reset
+        self._populate_grid()
+    
+    def _on_select_click(self, sender, event):
+        """Handle Select button click."""
+        if self.star_grid.SelectedRows.Count == 0:
+            MessageBox.Show("Please select a star first.", "No Selection", 
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        
+        row = self.star_grid.SelectedRows[0]
+        self.selected_star = row.Tag
+        
+        # Get airmass if available
+        airmass_str = str(row.Cells[6].Value)
+        if airmass_str:
+            try:
+                self.selected_airmass = float(airmass_str)
+            except:
+                self.selected_airmass = None
+        
+        # Store the filter that was active when selection was made
+        self.used_filter = self.active_filter
+        
+        self.DialogResult = DialogResult.OK
+        self.Close()
+    
+    def _on_cancel_click(self, sender, event):
+        """Handle Cancel button click."""
+        self.DialogResult = DialogResult.Cancel
+        self.Close()
+    
+    def _on_star_double_click(self, sender, event):
+        """Handle double-click on star row."""
+        if self.star_grid.SelectedRows.Count > 0:
+            self._on_select_click(sender, event)
 
 
 def show_data_acquisition_window(sharpcap=None, coordinate_parser=None, on_close_callback=None):

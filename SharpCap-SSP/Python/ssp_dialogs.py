@@ -30,6 +30,8 @@ class COMPortDialog(Form):
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
         self.MinimizeBox = False
+        self.AutoScaleMode = AutoScaleMode.Dpi
+        self.AutoScaleDimensions = System.Drawing.SizeF(96, 96)
         
         # Label
         label = Label()
@@ -98,6 +100,8 @@ class TimeZoneDialog(Form):
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
         self.MinimizeBox = False
+        self.AutoScaleMode = AutoScaleMode.Dpi
+        self.AutoScaleDimensions = System.Drawing.SizeF(96, 96)
         
         # Label
         label = Label()
@@ -175,6 +179,8 @@ class ObserverInfoDialog(Form):
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
         self.MinimizeBox = False
+        self.AutoScaleMode = AutoScaleMode.Dpi
+        self.AutoScaleDimensions = System.Drawing.SizeF(96, 96)
         
         # Telescope label and textbox
         tel_label = Label()
@@ -254,6 +260,8 @@ class FilterBarSetupDialog(Form):
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
         self.MinimizeBox = False
+        self.AutoScaleMode = AutoScaleMode.Dpi
+        self.AutoScaleDimensions = System.Drawing.SizeF(96, 96)
         
         # Instruction label
         inst_label = Label()
@@ -279,14 +287,14 @@ class FilterBarSetupDialog(Form):
         
         self.radio_bar2 = RadioButton()
         self.radio_bar2.Text = "2"
-        self.radio_bar2.Location = Point(110, 105)
+        self.radio_bar2.Location = Point(110, 110)
         self.radio_bar2.Size = Size(50, 22)
         self.radio_bar2.CheckedChanged += self._on_bar_changed
         self.Controls.Add(self.radio_bar2)
         
         self.radio_bar3 = RadioButton()
         self.radio_bar3.Text = "3"
-        self.radio_bar3.Location = Point(110, 140)
+        self.radio_bar3.Location = Point(110, 150)
         self.radio_bar3.Size = Size(50, 22)
         self.radio_bar3.CheckedChanged += self._on_bar_changed
         self.Controls.Add(self.radio_bar3)
@@ -400,25 +408,29 @@ class FilterBarSetupDialog(Form):
 class LocationDialog(Form):
     """Dialog for setting observer location with online lookup capabilities."""
     
-    def __init__(self, current_lat, current_lon, current_elev):
+    def __init__(self, current_lat, current_lon, current_elev, current_city=''):
         """Initialize location dialog.
         
         Args:
             current_lat: Current latitude in decimal degrees (-90 to +90)
             current_lon: Current longitude in decimal degrees (-180 to +180)
             current_elev: Current elevation in meters
+            current_city: Current city/town name (optional)
         """
         self.latitude = current_lat
         self.longitude = current_lon
         self.elevation = current_elev
+        self.city = current_city
         
         self.Text = "Observer Location"
-        self.Width = 520
-        self.Height = 620
+        self.Width = 650
+        self.Height = 730
         self.StartPosition = FormStartPosition.CenterParent
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
         self.MinimizeBox = False
+        self.AutoScaleMode = AutoScaleMode.Dpi
+        self.AutoScaleDimensions = System.Drawing.SizeF(96, 96)
         
         y_pos = 20
         
@@ -426,22 +438,22 @@ class LocationDialog(Form):
         title_label = Label()
         title_label.Text = "Enter Observer Location"
         title_label.Location = Point(20, y_pos)
-        title_label.Size = Size(470, 25)
+        title_label.Size = Size(600, 25)
         title_label.Font = Font(title_label.Font.FontFamily, 11, FontStyle.Bold)
         self.Controls.Add(title_label)
         
-        y_pos += 35
+        y_pos += 40  # Extra spacing
         
         # Step 1: Google Maps link
         maps_link = LinkLabel()
         maps_link.Text = "Step 1: Open in Google Maps"
         maps_link.Location = Point(20, y_pos)
-        maps_link.Size = Size(250, 20)
+        maps_link.Size = Size(300, 20)
         maps_link.Font = Font(maps_link.Font.FontFamily, 9, FontStyle.Bold)
         maps_link.LinkClicked += self._on_open_maps
         self.Controls.Add(maps_link)
         
-        y_pos += 25
+        y_pos += 35  # Extra spacing
         
         # Instructions
         instructions = Label()
@@ -449,32 +461,32 @@ class LocationDialog(Form):
                            "   b. Right-click the pin and select the coordinates (top of list)\n" +
                            "   c. Return here and click 'Paste Coordinates' below")
         instructions.Location = Point(20, y_pos)
-        instructions.Size = Size(470, 60)
+        instructions.Size = Size(610, 75)
         instructions.Font = Font(instructions.Font, FontStyle.Italic)
         instructions.ForeColor = Color.DarkBlue
         self.Controls.Add(instructions)
         
-        y_pos += 65
+        y_pos += 75  # Extra spacing
         
         # Step 2: Paste button
         paste_coords_btn = Button()
         paste_coords_btn.Text = "Step 2: Paste Coordinates"
         paste_coords_btn.Location = Point(20, y_pos)
-        paste_coords_btn.Size = Size(180, 32)
+        paste_coords_btn.Size = Size(220, 32)
         paste_coords_btn.Font = Font(paste_coords_btn.Font.FontFamily, 9, FontStyle.Bold)
         paste_coords_btn.Click += self._on_paste_coordinates
         self.Controls.Add(paste_coords_btn)
         
-        y_pos += 45
+        y_pos += 55  # Extra spacing
         
         # Latitude section
         lat_label = Label()
         lat_label.Text = "Latitude (decimal degrees):"
         lat_label.Location = Point(20, y_pos)
-        lat_label.Size = Size(200, 20)
+        lat_label.Size = Size(220, 25)
         self.Controls.Add(lat_label)
         
-        y_pos += 25
+        y_pos += 28
         
         self.lat_numeric = NumericUpDown()
         self.lat_numeric.Location = Point(20, y_pos)
@@ -491,20 +503,20 @@ class LocationDialog(Form):
         lat_help = Label()
         lat_help.Text = "North: positive (+), South: negative (-)"
         lat_help.Location = Point(170, y_pos + 3)
-        lat_help.Size = Size(320, 20)
+        lat_help.Size = Size(470, 25)
         lat_help.Font = Font(lat_help.Font, FontStyle.Italic)
         self.Controls.Add(lat_help)
         
-        y_pos += 40
+        y_pos += 50  # Extra spacing
         
         # Longitude section
         lon_label = Label()
         lon_label.Text = "Longitude (decimal degrees):"
         lon_label.Location = Point(20, y_pos)
-        lon_label.Size = Size(200, 20)
+        lon_label.Size = Size(230, 25)
         self.Controls.Add(lon_label)
         
-        y_pos += 25
+        y_pos += 28
         
         self.lon_numeric = NumericUpDown()
         self.lon_numeric.Location = Point(20, y_pos)
@@ -521,20 +533,20 @@ class LocationDialog(Form):
         lon_help = Label()
         lon_help.Text = "East: positive (+), West: negative (-)"
         lon_help.Location = Point(170, y_pos + 3)
-        lon_help.Size = Size(320, 20)
+        lon_help.Size = Size(470, 25)
         lon_help.Font = Font(lon_help.Font, FontStyle.Italic)
         self.Controls.Add(lon_help)
         
-        y_pos += 40
+        y_pos += 50  # Extra spacing
         
         # Elevation section
         elev_label = Label()
         elev_label.Text = "Elevation (meters above sea level):"
         elev_label.Location = Point(20, y_pos)
-        elev_label.Size = Size(250, 20)
+        elev_label.Size = Size(280, 25)
         self.Controls.Add(elev_label)
         
-        y_pos += 25
+        y_pos += 28
         
         self.elev_numeric = NumericUpDown()
         self.elev_numeric.Location = Point(20, y_pos)
@@ -552,59 +564,60 @@ class LocationDialog(Form):
         lookup_elev_btn = Button()
         lookup_elev_btn.Text = "Lookup Elevation"
         lookup_elev_btn.Location = Point(170, y_pos)
-        lookup_elev_btn.Size = Size(130, 28)
+        lookup_elev_btn.Size = Size(140, 32)
         lookup_elev_btn.Click += self._on_lookup_elevation
         self.Controls.Add(lookup_elev_btn)
         
         elev_help = Label()
         elev_help.Text = "(Optional, for atmospheric corrections)"
-        elev_help.Location = Point(310, y_pos + 3)
-        elev_help.Size = Size(190, 20)
+        elev_help.Location = Point(320, y_pos + 3)
+        elev_help.Size = Size(320, 25)
         elev_help.Font = Font(elev_help.Font, FontStyle.Italic)
         self.Controls.Add(elev_help)
         
-        y_pos += 40
+        y_pos += 50  # Extra spacing
         
         # City/Town name section
         city_label = Label()
         city_label.Text = "City/Town (optional):"
         city_label.Location = Point(20, y_pos)
-        city_label.Size = Size(200, 20)
+        city_label.Size = Size(200, 25)
         self.Controls.Add(city_label)
         
-        y_pos += 25
+        y_pos += 28
         
         self.city_text = TextBox()
         self.city_text.Location = Point(20, y_pos)
         self.city_text.Size = Size(250, 25)
+        self.city_text.Text = current_city
         self.Controls.Add(self.city_text)
         
         # Lookup City button
         lookup_city_btn = Button()
         lookup_city_btn.Text = "Lookup City"
         lookup_city_btn.Location = Point(280, y_pos)
-        lookup_city_btn.Size = Size(110, 28)
+        lookup_city_btn.Size = Size(120, 32)
         lookup_city_btn.Click += self._on_lookup_city
         self.Controls.Add(lookup_city_btn)
         
         city_help = Label()
-        city_help.Text = "(Looks up city name from coordinates)"
-        city_help.Location = Point(400, y_pos + 3)
-        city_help.Size = Size(90, 40)
+        city_help.Text = "Looks up city from coords"
+        city_help.Location = Point(410, y_pos + 3)
+        city_help.Size = Size(230, 25)
         city_help.Font = Font(city_help.Font, FontStyle.Italic)
         self.Controls.Add(city_help)
         
-        y_pos += 45
+        y_pos += 55  # Extra spacing
         
         # Examples section
         examples_label = Label()
         examples_label.Text = "Examples:"
         examples_label.Location = Point(20, y_pos)
-        examples_label.Size = Size(400, 20)
+        examples_label.Size = Size(600, 25)
         examples_label.Font = Font(examples_label.Font, FontStyle.Bold)
         self.Controls.Add(examples_label)
         
-        y_pos += 25
+        y_pos += 28
         
         examples = Label()
         examples.Text = ("Greenwich, UK:      51.4769 N,   -0.0005 E,     0 m\n" +
@@ -612,11 +625,11 @@ class LocationDialog(Form):
                         "Mauna Kea, HI:      19.8207 N, -155.4681 W, 4207 m\n" +
                         "Sydney, AU:        -33.8688 S,  151.2093 E,    58 m")
         examples.Location = Point(20, y_pos)
-        examples.Size = Size(400, 70)
+        examples.Size = Size(550, 80)
         examples.Font = Font("Courier New", 8.5)
         self.Controls.Add(examples)
         
-        y_pos += 85
+        y_pos += 95  # Extra spacing
         
         # Buttons
         ok_btn = Button()
@@ -827,6 +840,7 @@ class LocationDialog(Form):
         self.latitude = float(self.lat_numeric.Value)
         self.longitude = float(self.lon_numeric.Value)
         self.elevation = float(self.elev_numeric.Value)
+        self.city = self.city_text.Text.strip()
         self.DialogResult = DialogResult.OK
         self.Close()
     

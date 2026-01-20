@@ -1,4 +1,4 @@
-# Create release ZIP for SharpCap-SSP v0.1.2
+# Create release ZIP for SharpCap-SSP v0.1.3
 
 $files = @(
     "Python\main.py",
@@ -7,6 +7,7 @@ $files = @(
     "Python\ssp_config.py",
     "Python\ssp_dialogs.py",
     "Python\ssp_catalog.py",
+    "Python\ssp_extinction.py",
     "Python\night_mode.py",
     "Python\install.ps1",
     "Python\Launch_SSP.bat",
@@ -16,10 +17,11 @@ $files = @(
     "Python\requirements.txt",
     "Python\SSP.ico",
     "Python\starparm_latest.csv",
+    "Python\first_order_extinction_stars.csv",
     "README.md"
 )
 
-$zipPath = "SharpCap-SSP-v0.1.2.zip"
+$zipPath = "SharpCap-SSP-v0.1.3.zip"
 
 Write-Host "Creating $zipPath..." -ForegroundColor Green
 
