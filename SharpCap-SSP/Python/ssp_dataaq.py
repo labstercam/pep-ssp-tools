@@ -186,6 +186,12 @@ class SSPDataAcquisitionWindow(Form):
         
         setup_menu.DropDownItems.Add(ToolStripSeparator())
         
+        location_item = ToolStripMenuItem("Observer Location...")
+        location_item.Click += self._on_observer_location
+        setup_menu.DropDownItems.Add(location_item)
+        
+        setup_menu.DropDownItems.Add(ToolStripSeparator())
+        
         night_item = ToolStripMenuItem("Night/Day Screen")
         night_item.Click += self._on_toggle_night_mode
         setup_menu.DropDownItems.Add(night_item)
@@ -952,6 +958,31 @@ class SSPDataAcquisitionWindow(Form):
             MessageBox.Show("Filter mode set to: Manual (2-position slider)\n\n" +
                           "You will need to manually change filters when prompted.",
                           "Manual Filter Mode", MessageBoxButtons.OK, MessageBoxIcon.Information)
+    
+    def _on_observer_location(self, sender, event):
+        """Handle Observer Location menu item."""
+        # Get current location from config
+        current_lat = self.config.get('observer_latitude', 0.0)
+        current_lon = self.config.get('observer_longitude', 0.0)
+        current_elev = self.config.get('observer_elevation', 0.0)
+        
+        # Show location dialog
+        dialog = ssp_dialogs.LocationDialog(current_lat, current_lon, current_elev)
+        
+        if dialog.ShowDialog() == DialogResult.OK:
+            # Save changes
+            self.config.set('observer_latitude', dialog.latitude)
+            self.config.set('observer_longitude', dialog.longitude)
+            self.config.set('observer_elevation', dialog.elevation)
+            self.config.save()
+            
+            # Format location for status message
+            lat_dir = "N" if dialog.latitude >= 0 else "S"
+            lon_dir = "E" if dialog.longitude >= 0 else "W"
+            lat_str = "{0:.4f}".format(abs(dialog.latitude)) + lat_dir
+            lon_str = "{0:.4f}".format(abs(dialog.longitude)) + lon_dir
+            
+            self._update_status("Location saved: " + lat_str + ", " + lon_str)
     
     def _update_filter_combo(self):
         """Update filter combo box with filters from active bar."""
