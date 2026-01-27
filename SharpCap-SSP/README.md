@@ -6,11 +6,11 @@ SharpCap-SSP is a Python-based tool for integrating Optec SSP photometers with S
 
 ## 📥 Quick Download
 
-**Latest Release: v0.1.3**
+**Latest Release: v0.1.4**
 
-https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.3 
+https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.4 
 
-### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.3.zip)
+### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.4.zip)
 
 *Non-experts: Just download the ZIP, extract it, and follow the `QUICK_INSTALL.txt` file inside.*
 
@@ -20,13 +20,14 @@ https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.3
 
 This tool replicates the core data collection functionality of the original SSPDataq software, enabling serial communication and photometer control directly within the SharpCap environment or standalone.
 
-## Status: Version 0.1.3 - Fully Functional
+## Status: Version 0.1.4 - Fully Functional
 
 ✅ **Serial communication implemented and tested**
 ✅ **Data collection working (slow mode + trial mode)**
 ✅ **File export in SSPDataq .raw format**
 ✅ **First order extinction star selection with airmass filtering**
 ✅ **Real-time Alt/Az coordinate display**
+✅ **All Sky Calibration tool for extinction coefficient calculation**
 ✅ **Test scripts included for verification**
 
 See [QUICK_START.md](QUICK_START.md) for usage instructions.
@@ -49,6 +50,13 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
   - Alt/Az shown in both target star and extinction star grids
   - Corrected azimuth calculation matching planetarium software
   - Below-horizon stars automatically filtered
+- ✅ **All Sky Calibration**: Calculate first-order extinction coefficients
+  - Load .raw data files from All Sky observations
+  - Calculate K'v (V extinction) and K'bv (B-V color extinction)
+  - Linear regression with scatter plot and best-fit line
+  - Transformation coefficients (epsilon, mu) loaded from PPparms3.txt
+  - Results display with zero points and standard error
+  - Compatible with AllSky2,57.bas format
 - ✅ Serial COM port connection and management (19200,N,8,1)
 - ✅ Automatic COM port disconnect on program close
 - ✅ SSP photometer command protocol (SSSSSS, SEEEEE, SCnnnn, SGNNN)

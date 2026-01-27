@@ -1,4 +1,4 @@
-# Create release ZIP for SharpCap-SSP v0.1.3
+# Create release ZIP for SharpCap-SSP v0.1.4
 
 $files = @(
     "Python\main.py",
@@ -8,6 +8,8 @@ $files = @(
     "Python\ssp_dialogs.py",
     "Python\ssp_catalog.py",
     "Python\ssp_extinction.py",
+    "Python\ssp_allsky.py",
+    "Python\ssp_location_utils.py",
     "Python\night_mode.py",
     "Python\install.ps1",
     "Python\Launch_SSP.bat",
@@ -21,7 +23,7 @@ $files = @(
     "README.md"
 )
 
-$zipPath = "SharpCap-SSP-v0.1.3.zip"
+$zipPath = "SharpCap-SSP-v0.1.4.zip"
 
 Write-Host "Creating $zipPath..." -ForegroundColor Green
 
@@ -38,3 +40,6 @@ if (Test-Path $zipPath) {
 } else {
     Write-Host "ERROR: Failed to create zip file" -ForegroundColor Red
 }
+
+Write-Host "`nPress any key to exit..." -ForegroundColor Cyan
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

@@ -14,6 +14,8 @@ Package the following files from `SharpCap-SSP/Python/`:
 - ssp_dialogs.py
 - ssp_catalog.py
 - ssp_extinction.py
+- ssp_allsky.py
+- ssp_location_utils.py
 - night_mode.py
 
 **Installation & Launch Scripts:**

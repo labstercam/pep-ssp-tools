@@ -1,7 +1,7 @@
 # pep-ssp-tools
 Tools for operating the SSP3 and 4 Photoelectric Photometers (PEP).
 
-**Current Version: v0.1.3** - First Order Extinction & Coordinate Display
+**Current Version: v0.1.4** - All Sky Calibration
 
 Prototype development at the moment. Use entirely at your own risk. Please contact me with suggestions or feedback.
 
@@ -12,8 +12,9 @@ Working prototype of SSP data collection software using SharpCap. Features inclu
 - ✅ Full serial communication with SSP-3a/SSP-5a photometers
 - ✅ Data collection (Slow, Trial modes) with .raw file export
 - ✅ Star catalog integration with 300+ PEP targets
-- ✅ **NEW:** First Order Extinction star selection with airmass filtering (150+ standards)
-- ✅ **NEW:** Real-time Alt/Az coordinate display for all targets
+- ✅ First Order Extinction star selection with airmass filtering (150+ standards)
+- ✅ Real-time Alt/Az coordinate display for all targets
+- ✅ **NEW:** All Sky Calibration tool for extinction coefficient calculation (K'v, K'bv)
 - ✅ Automated and manual filter bar control
 - ✅ GOTO telescope integration
 - ✅ Night mode UI with proper button highlighting
