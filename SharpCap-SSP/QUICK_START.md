@@ -524,24 +524,29 @@ From the main launcher:
 3. Results show K'bv, ZPbv, Ebv
 
 ### Data File Format
-Your .raw file should have this structure:
+Your .raw file should contain star and sky observations:
 ```
-Line 1: Star observation (3 counts + time/date/filter)
-Line 2: Sky background for that star (3 counts)
-Line 3: Next star observation
-Line 4: Sky for that star
-...
+Line format: MM-DD-YYYY HH:MM:SS C OBJECTNAME F CNT1 CNT2 CNT3 CNT4 IT GN
 ```
-
-Each line format:
-```
-MM-DD-YYYY HH:MM:SS C OBJECTNAME F CNT1 CNT2 CNT3 CNT4 IT GN
-```
-- C = 'F' for All-sky calibration stars
-- OBJECTNAME = Star name matching catalog
+- C = 'F' for All-sky calibration stars, 'C' for Check stars
+- OBJECTNAME = Star name matching catalog, or SKY/SKYNEXT/SKYLAST for sky readings
 - F = Filter (V, B, U, R)
-- CNT1-CNT3 = Count values
-- Sky line: OBJECTNAME starts with "SKY"
+- CNT1-CNT3 = Count values (3 readings averaged)
+
+**Sky Reading Labels:**
+- `SKY` - Regular sky reading
+- `SKYNEXT` - Sky reading to be used for following stars
+- `SKYLAST` - Sky reading to be used as the last one
+
+**Sky Association Method:**
+The program follows the original SSPDataq AllSky2,57.bas logic:
+1. For each star, searches backward for the most recent sky reading (matching filter)
+2. Searches forward for the next sky reading (matching filter)
+3. If both found: Interpolates sky value based on observation time (Julian Date)
+4. If only one found: Uses that sky value
+5. If none found: Warning issued and star skipped
+
+This allows flexible sky placement - stars can share sky readings, and the program automatically interpolates between them based on observation time.
 
 ### Transformation Coefficients
 - Epsilon (ε): Loaded from PPparms3.txt line 8

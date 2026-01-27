@@ -624,13 +624,11 @@ class AllSkyCalibrationDialog(Form):
                               MessageBoxButtons.OK, MessageBoxIcon.Error)
                 return
             
-            # Parse data lines (skip 4-line header)
-            # Format: star line followed immediately by sky line for that star
-            observations = {}  # Group by star name
-            debug_count = 0  # Counter for debug output
+            # Parse ALL data lines first (both stars and sky readings)
+            # Following AllSky2,57.bas [Convert_RawFile] and [IREX_RawFile] logic
+            all_records = []  # Store all observations including sky readings
             
-            i = 4  # Start after 4-line header
-            while i < len(lines):
+            for i in range(4, len(lines)):
                 line = lines[i]
                 
                 # Use fixed-width field parsing to match AllSky2,57.bas [Convert_RawFile]
@@ -639,45 +637,26 @@ class AllSkyCalibrationDialog(Form):
                 # Format: MM-DD-YYYY HH:MM:SS CAT OBJECT F CNT1 CNT2 CNT3 CNT4 INT SCLE
                 # BASIC:  1-10       12-19    21  26-37  41 44-48 51-55 58-62 65-69 72-73 75-77
                 if len(line) < 70:
-                    i += 1
                     continue
                 
-                # Extract fields using BASIC positions (accounting for leading space)
+                # Extract fields using BASIC positions
                 try:
-                    date_str = line[1:11].strip()     # BASIC pos 1, len 10: MM-DD-YYYY
-                    time_str = line[12:20].strip()    # BASIC pos 12, len 8: HH:MM:SS (positions 12-19)
-                    cat = line[21:22].strip()         # BASIC pos 21, len 1: Catalog code
-                    obj_name = line[26:38].strip()    # BASIC pos 26, len 12: Star name
-                    filter_name = line[41:42].strip() # BASIC pos 41, len 1: Filter
-                    # Counts: BASIC pos 44, 51, 58, 65 (len 5 each)
+                    date_str = line[1:11].strip()     # MM-DD-YYYY
+                    time_str = line[12:20].strip()    # HH:MM:SS
+                    cat = line[21:22].strip()         # Catalog code
+                    obj_name = line[26:38].strip()    # Object name (star or SKY/SKYNEXT/SKYLAST)
+                    filter_name = line[41:42].strip() # Filter
                     cnt1_str = line[44:49].strip()
                     cnt2_str = line[51:56].strip()
                     cnt3_str = line[58:63].strip()
                     cnt4_str = line[65:70].strip() if len(line) >= 70 else ""
                 except IndexError:
-                    i += 1
                     continue
                 
                 if not date_str or not time_str:
-                    i += 1
                     continue
                 
-                # Skip lines that are sky readings without associated star
-                if obj_name.upper().startswith("SKY"):
-                    i += 1
-                    continue
-                
-                # Process calibration stars (F-type or C-type)
-                # F = All-sky calibration stars
-                # C = Check stars (standard photometric stars suitable for extinction)
-                if cat not in ['F', 'C']:
-                    print("Skipping non-calibration star: cat='{0}', obj='{1}'".format(cat, obj_name))
-                    i += 1
-                    continue
-                
-                print("Processing calibration star: cat='{0}', obj='{1}', filter='{2}'".format(cat, obj_name, filter_name))
-                
-                # Parse star counts (only first 3 values for All Sky)
+                # Parse counts (only first 3 for All Sky)
                 try:
                     counts = []
                     if cnt1_str and cnt1_str.isdigit():
@@ -686,79 +665,143 @@ class AllSkyCalibrationDialog(Form):
                         counts.append(int(cnt2_str))
                     if cnt3_str and cnt3_str.isdigit():
                         counts.append(int(cnt3_str))
-                    # Note: cnt4 is not used for All Sky observations
-                    
-                    # Debug: show first few stars' raw count strings
-                    if debug_count < 3:
-                        print("  Star raw counts: '{0}', '{1}', '{2}'".format(cnt1_str, cnt2_str, cnt3_str))
-                        print("  Star parsed counts: {0}".format(counts))
                     
                     if len(counts) < 3:
-                        i += 1
                         continue
                     
-                    # Calculate average star count (only first 3)
+                    # Calculate average count
                     avg_count = sum(counts) / 3.0
-                    
-                    # Read next line for sky background
-                    i += 1
-                    if i >= len(lines):
-                        print("  Warning: No sky line after star '{0}'".format(obj_name))
-                        continue
-                    
-                    sky_line = lines[i]
-                    if len(sky_line) < 70:
-                        print("  Warning: Sky line too short for star '{0}'".format(obj_name))
-                        continue
-                    
-                    # Parse sky counts from next line
-                    sky_cnt1_str = sky_line[44:49].strip()
-                    sky_cnt2_str = sky_line[51:56].strip()
-                    sky_cnt3_str = sky_line[58:63].strip()
-                    
-                    sky_counts = []
-                    if sky_cnt1_str and sky_cnt1_str.isdigit():
-                        sky_counts.append(int(sky_cnt1_str))
-                    if sky_cnt2_str and sky_cnt2_str.isdigit():
-                        sky_counts.append(int(sky_cnt2_str))
-                    if sky_cnt3_str and sky_cnt3_str.isdigit():
-                        sky_counts.append(int(sky_cnt3_str))
-                    
-                    if debug_count <= 3:
-                        print("  Sky raw counts: '{0}', '{1}', '{2}'".format(sky_cnt1_str, sky_cnt2_str, sky_cnt3_str))
-                        print("  Sky parsed counts: {0}".format(sky_counts))
-                    debug_count += 1
-                    
-                    if len(sky_counts) < 3:
-                        print("  Warning: Invalid sky counts for star '{0}'".format(obj_name))
-                        i += 1
-                        continue
-                    
-                    # Calculate average sky count
-                    sky_avg = sum(sky_counts) / float(len(sky_counts))
                     
                     # Parse datetime
                     datetime_str = date_str + " " + time_str
                     obs_time = dt_datetime.strptime(datetime_str, "%m-%d-%Y %H:%M:%S")
-                    # .raw files record times in UTC - mark as UTC timezone
                     from datetime import timezone
                     obs_time = obs_time.replace(tzinfo=timezone.utc)
                     
-                    # Store observation - allow multiple observations of same star/filter
-                    key = (obj_name, filter_name, obs_time)  # Include time to avoid overwriting
-                    observations[key] = {
-                        'name': obj_name,
+                    # Calculate Julian Date from J2000 epoch
+                    # Following AllSky2,57.bas [Julian_Day_RawFile] exactly
+                    month = int(date_str[0:2])
+                    day = int(date_str[3:5])
+                    year = int(date_str[6:10])
+                    hour = int(time_str[0:2])
+                    minute = int(time_str[3:5])
+                    second = int(time_str[6:8])
+                    
+                    A = int(year / 100)
+                    B = 2 - A + int(A / 4)
+                    C = int(365.25 * year)
+                    D = int(30.6001 * (month + 1))
+                    JD = B + C + D - 730550.5 + day + (hour + minute/60.0 + second/3600.0)/24.0
+                    
+                    # Store record with all info
+                    record = {
+                        'index': i,
+                        'catalog': cat,
+                        'object': obj_name,
                         'filter': filter_name,
+                        'count': avg_count,
                         'time': obs_time,
-                        'counts': avg_count,
-                        'sky': sky_avg
+                        'jd': JD  # Julian Date for interpolation
                     }
-                
+                    all_records.append(record)
+                    
                 except (ValueError, IndexError) as e:
-                    print("Error parsing line: " + line + " - " + str(e))
+                    print("Error parsing line {0}: {1}".format(i, str(e)))
+                    continue
+            
+            if not all_records:
+                MessageBox.Show(
+                    "No data found in file.\n\n" +
+                    "File must contain observations marked with catalog codes.",
+                    "No Data",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                )
+                return
+            
+            # Now process star observations with sky subtraction
+            # Following AllSky2,57.bas [IREX_RawFile] logic exactly
+            observations = {}
+            debug_count = 0
+            
+            for idx, record in enumerate(all_records):
+                # Process only calibration stars (F or C catalog codes)
+                if record['catalog'] not in ['F', 'C']:
+                    continue
                 
-                # Move to next star (skip the sky line we just processed)
-                i += 1
+                # Skip sky readings themselves
+                # Object names are padded to 12 characters in .raw file
+                # Compare against padded strings like BASIC does (case-insensitive)
+                obj_padded = (record['object'].upper() + "            ")[:12]  # Pad to 12 chars
+                if obj_padded in ["SKY         ", "SKYNEXT     ", "SKYLAST     "]:
+                    continue
+                
+                if debug_count < 3:
+                    print("Processing star: '{0}', filter={1}, count={2:.1f}".format(
+                        record['object'], record['filter'], record['count']))
+                
+                # Find past sky count (search backward)
+                # Looking for "SKY" or "SKYNEXT" with matching filter (12-char padded comparison)
+                sky_past_count = 0
+                past_time = 0
+                for i in range(idx - 1, -1, -1):
+                    check_rec = all_records[i]
+                    check_obj_padded = (check_rec['object'].upper() + "            ")[:12]
+                    if ((check_obj_padded == "SKY         " or check_obj_padded == "SKYNEXT     ") and 
+                        check_rec['filter'] == record['filter']):
+                        sky_past_count = check_rec['count']
+                        past_time = check_rec['jd']
+                        if debug_count < 3:
+                            print("  Found past sky: count={0:.1f}, JD={1:.5f}".format(sky_past_count, past_time))
+                        break
+                
+                # Find future sky count (search forward)
+                # Looking for "SKY" or "SKYLAST" with matching filter (12-char padded comparison)
+                sky_future_count = 0
+                future_time = 0
+                for i in range(idx + 1, len(all_records)):
+                    check_rec = all_records[i]
+                    check_obj_padded = (check_rec['object'].upper() + "            ")[:12]
+                    if ((check_obj_padded == "SKY         " or check_obj_padded == "SKYLAST     ") and 
+                        check_rec['filter'] == record['filter']):
+                        sky_future_count = check_rec['count']
+                        future_time = check_rec['jd']
+                        if debug_count < 3:
+                            print("  Found future sky: count={0:.1f}, JD={1:.5f}".format(sky_future_count, future_time))
+                        break
+                
+                # Apply sky subtraction with interpolation
+                # Following AllSky2,57.bas lines 951-966 exactly
+                if sky_past_count == 0 and sky_future_count == 0:
+                    print("Warning: No SKY counts found for star '{0}' at index {1}".format(
+                        record['object'], idx))
+                    continue
+                elif sky_past_count > 0 and sky_future_count == 0:
+                    # Only past sky available
+                    sky_count = sky_past_count
+                elif sky_past_count == 0 and sky_future_count > 0:
+                    # Only future sky available
+                    sky_count = sky_future_count
+                else:
+                    # Both available - interpolate
+                    # y = y1 + ((y2 - y1) / (x2 - x1)) * (x - x1)
+                    sky_count = sky_past_count + ((sky_future_count - sky_past_count) / 
+                                                   (future_time - past_time)) * (record['jd'] - past_time)
+                
+                if debug_count < 3:
+                    print("  Applied sky={0:.1f}, net_count={1:.1f}".format(
+                        sky_count, record['count'] - sky_count))
+                    debug_count += 1
+                
+                # Store observation with sky-subtracted count
+                key = (record['object'], record['filter'], record['time'])
+                observations[key] = {
+                    'name': record['object'],
+                    'filter': record['filter'],
+                    'time': record['time'],
+                    'counts': record['count'],
+                    'sky': sky_count
+                }
             
             if not observations:
                 MessageBox.Show(
@@ -767,8 +810,8 @@ class AllSkyCalibrationDialog(Form):
                     "standard stars marked as:\n" +
                     "  F = All-sky calibration stars\n" +
                     "  C = Check stars (standard photometric stars)\n\n" +
-                    "The stars in first_order_extinction_stars.csv are suitable\n" +
-                    "when observed and marked as 'C' or 'F' in your data file.",
+                    "Sky readings should be labeled as 'SKY', 'SKYNEXT', or 'SKYLAST'.\n" +
+                    "The program will interpolate between sky readings based on observation time.",
                     "No Data",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning

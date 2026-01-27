@@ -383,21 +383,33 @@ Complete implementation of AllSky2,57.bas functionality for calculating extincti
 
 **File Format:**
 - 4-line header (skipped)
-- Paired observations: Star line, Sky line, Star line, Sky line...
+- Mixed star and sky observations in any order
 - Fixed-width fields (BASIC positions):
   - Date: pos 1-10 (MM-DD-YYYY)
   - Time: pos 12-19 (HH:MM:SS)
   - Catalog: pos 21 (F/C for calibration stars)
-  - Object: pos 26-37 (12 chars)
+  - Object: pos 26-37 (12 chars - star name or SKY/SKYNEXT/SKYLAST)
   - Filter: pos 41 (V/B/U/R)
   - Counts: pos 44-48, 51-55, 58-62 (first 3 values only)
+
+**Sky Association Method (matches AllSky2,57.bas exactly):**
+1. Read all records (stars and sky) into array with Julian Dates
+2. For each star observation:
+   - Search backward for most recent sky reading (matching filter)
+   - Search forward for next sky reading (matching filter)
+   - Sky labels: "SKY", "SKYNEXT", or "SKYLAST"
+3. Apply sky subtraction:
+   - If no sky found: Error, skip star
+   - If only past sky: Use that value
+   - If only future sky: Use that value
+   - If both: Interpolate using Julian Date
+4. Interpolation formula: `sky = past + ((future - past) / (future_time - past_time)) * (star_time - past_time)`
 
 **Count Processing:**
 - Parse 3 count values per line
 - Calculate average: (cnt1 + cnt2 + cnt3) / 3.0
-- Star line: observation counts
-- Next line (sky): background counts
-- Net count = star_avg - sky_avg
+- All records processed first, then sky subtraction applied
+- Net count = star_avg - sky_value (after interpolation)
 
 **Transformation Equations:**
 - For V extinction: Y = (V-v) - ε(B-V) vs X = airmass
