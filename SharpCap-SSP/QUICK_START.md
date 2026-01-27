@@ -533,6 +533,48 @@ Line format: MM-DD-YYYY HH:MM:SS C OBJECTNAME F CNT1 CNT2 CNT3 CNT4 IT GN
 - F = Filter (V, B, U, R)
 - CNT1-CNT3 = Count values (3 readings averaged)
 
+#### ⚠️ Important: Leading Space in .raw Files
+
+**All data lines in .raw files have a leading space character.** This is critical for understanding field positions:
+
+**BASIC (SSPDataq) behavior:**
+- Uses `input #file` statement to read data lines (lines 5+)
+- The `input` statement **automatically strips the leading space**
+- Field positions in BASIC code use `mid$(line, pos, len)` with 1-based indexing
+- Example: `mid$(line, 1, 2)` extracts month "09" (positions 1-2 AFTER space removal)
+
+**Python (SharpCap-SSP) behavior:**
+- Uses standard file reading that **preserves the leading space**
+- Field positions use Python slicing with 0-based indexing
+- Must account for the leading space when mapping BASIC positions
+- Example: `line[1:11]` extracts "09-23-2007" (positions 2-11 in the actual file)
+
+**Position Mapping:**
+```
+Actual file:  _09-23-2007_02:04:59_C____BS458__________U__00706__00712__00706______0__10_1
+              ^                                                                            
+              Position 0 (Python) / Leading space (stripped by BASIC input)
+
+BASIC mid$(line, start, len) → Python line[start:end]
+------------------------------------------------
+mid$(1, 2)   → Month "09"     → line[1:3]   (positions 2-3 in file)
+mid$(4, 2)   → Day "23"       → line[4:6]   (positions 5-6 in file)  
+mid$(7, 4)   → Year "2007"    → line[7:11]  (positions 8-11 in file)
+mid$(12, 2)  → Hour "02"      → line[12:14] (positions 13-14 in file)
+mid$(21, 1)  → Catalog "C"    → line[21:22] (position 22 in file)
+mid$(26, 12) → Object name    → line[26:38] (positions 27-38 in file)
+mid$(41, 1)  → Filter "U"     → line[41:42] (position 42 in file)
+mid$(44, 5)  → Count1         → line[44:49] (positions 45-49 in file)
+mid$(72, 2)  → Integration    → line[72:74] (positions 73-74 in file)
+mid$(75, 3)  → Scale          → line[75:78] (positions 76-78 in file)
+```
+
+**Why this matters:**
+- Field positions appear "off by one" when comparing BASIC and Python code
+- Both implementations are correct - they account for different file reading behavior
+- When debugging or comparing implementations, always remember BASIC positions are post-strip
+- The leading space is NOT an error - it's part of the SSPDataq .raw file format
+
 **Sky Reading Labels:**
 - `SKY` - Regular sky reading
 - `SKYNEXT` - Sky reading to be used for following stars
@@ -548,11 +590,34 @@ The program follows the original SSPDataq AllSky2,57.bas logic:
 
 This allows flexible sky placement - stars can share sky readings, and the program automatically interpolates between them based on observation time.
 
+### Managing Coefficients
+
+**Coefficients Menu:**
+The Coefficients menu provides tools for managing zero-point and standard error values:
+
+1. **Load Previous** - Loads saved values from PPparms3.txt:
+   - Zero-points: ZPv, ZPbv (lines 29-31)
+   - Standard errors: Ev, Ebv (lines 33-35)
+   - Displays previously saved calibration results
+   
+2. **Use Current** - Copies computed results to result boxes:
+   - Transfers values from most recent regression calculation
+   - Allows review before saving
+   
+3. **Save** - Saves result box values to PPparms3.txt:
+   - Updates zero-points and standard errors
+   - Type '0' in box to keep previous value unchanged
+   - Confirmation dialog before saving
+   
+4. **Clear** - Clears all result text boxes
+
 ### Transformation Coefficients
 - Epsilon (ε): Loaded from PPparms3.txt line 8
 - Mu (μ): Loaded from PPparms3.txt line 10
+- Zero-points (ZPv, ZPbv): Loaded from PPparms3.txt lines 29-31
+- Standard errors (Ev, Ebv): Loaded from PPparms3.txt lines 33-35
 - These are used in transformation equations
-- If PPparms3.txt not found, defaults to ε=-0.030, μ=1.047
+- If PPparms3.txt not found, defaults to zeros
 
 ### Saving Results
 1. Go to **File → Save Plot...**

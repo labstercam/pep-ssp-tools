@@ -57,6 +57,8 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
   - Transformation coefficients (epsilon, mu) loaded from PPparms3.txt
   - Results display with zero points and standard error
   - Compatible with AllSky2,57.bas format
+  - **VERIFIED**: All 12 processing steps match BASIC implementation exactly
+  - Enhanced: Accepts V-only observations for improved flexibility
 - ✅ Serial COM port connection and management (19200,N,8,1)
 - ✅ Automatic COM port disconnect on program close
 - ✅ SSP photometer command protocol (SSSSSS, SEEEEE, SCnnnn, SGNNN)
