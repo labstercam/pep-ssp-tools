@@ -465,6 +465,127 @@ exec(open('ssp_test_serial.py').read())
 
 ---
 
+## All Sky Calibration (Extinction Coefficients)
+
+### Overview
+Calculate first-order extinction coefficients (K'v and K'bv) from All Sky observations of standard stars at different airmasses.
+
+### Prerequisites
+- Observer location must be configured (File → Set Location)
+- .raw data file with All Sky observations
+- Data format: Star line followed by sky line (paired observations)
+- Stars marked as 'F' (All-sky calibration) or 'C' (Check stars)
+- PPparms3.txt file with transformation coefficients (epsilon, mu)
+
+### Launching All Sky Calibration
+From the main launcher:
+1. Click **"All Sky Calibration"** button
+2. Dialog opens with empty data grid and graph area
+
+### Loading Data
+1. Go to **File → Open Data File...**
+2. Select your .raw file with All Sky observations
+3. Data is automatically processed:
+   - Star-sky pairs are read and averaged
+   - Airmass calculated for each observation time
+   - Instrumental magnitudes computed
+   - Transformation columns calculated
+   - Results displayed in data grid
+
+### Understanding the Display
+
+**Data Grid Columns:**
+- **Star**: Star name from catalog
+- **X**: Airmass at observation time
+- **V**: Standard V magnitude (from catalog)
+- **B-V**: Standard B-V color (from catalog)
+- **v**: Instrumental V magnitude
+- **(V-v)-ε(B-V)**: Transformation column for K'v (Y-axis for V plot)
+- **(B-V)-μ(b-v)**: Transformation column for K'bv (Y-axis for B-V plot)
+
+### Calculating Extinction Coefficients
+
+**For V magnitude extinction (K'v):**
+1. Click **"extinction plot for v"**
+2. Graph displays:
+   - X-axis: Airmass
+   - Y-axis: (V-v) - ε(B-V)
+   - Data points as circles
+   - Red best-fit regression line
+3. Results display shows:
+   - **K'v**: Extinction coefficient (slope)
+   - **ZPv**: Zero point (intercept)
+   - **Ev**: Standard error
+4. Analysis box shows slope, intercept, standard error
+
+**For B-V color extinction (K'bv):**
+1. Click **"extinction plot for b-v"**
+2. Similar display with (B-V)-μ(b-v) vs airmass
+3. Results show K'bv, ZPbv, Ebv
+
+### Data File Format
+Your .raw file should have this structure:
+```
+Line 1: Star observation (3 counts + time/date/filter)
+Line 2: Sky background for that star (3 counts)
+Line 3: Next star observation
+Line 4: Sky for that star
+...
+```
+
+Each line format:
+```
+MM-DD-YYYY HH:MM:SS C OBJECTNAME F CNT1 CNT2 CNT3 CNT4 IT GN
+```
+- C = 'F' for All-sky calibration stars
+- OBJECTNAME = Star name matching catalog
+- F = Filter (V, B, U, R)
+- CNT1-CNT3 = Count values
+- Sky line: OBJECTNAME starts with "SKY"
+
+### Transformation Coefficients
+- Epsilon (ε): Loaded from PPparms3.txt line 8
+- Mu (μ): Loaded from PPparms3.txt line 10
+- These are used in transformation equations
+- If PPparms3.txt not found, defaults to ε=-0.030, μ=1.047
+
+### Saving Results
+1. Go to **File → Save Plot...**
+2. Choose location and filename
+3. Graph saved as PNG image
+
+### Tips
+- Observe at least 5-10 standard stars across different airmasses (1.0-2.5)
+- Ensure stars are well-distributed in airmass range
+- Good seeing conditions minimize scatter
+- Check that all stars are found in catalog (warnings printed if not)
+- Sky readings should be taken close in time to star readings
+
+### Troubleshooting
+**"Star not found in catalog"**
+- Ensure star name matches first_order_extinction_stars.csv
+- Check spelling and formatting
+
+**"No calibration stars found"**
+- Verify catalog code is 'F' or 'C' in .raw file
+- Check file format (needs 4-line header)
+
+**Buttons disabled after loading data**
+- Data may be invalid or all stars below horizon
+- Check console output for errors
+
+**Results differ from spreadsheet**
+- Verify transformation coefficients (epsilon, mu)
+- Check airmass calculation (observer location must be set)
+- Ensure count averaging is correct (3 counts per observation)
+
+### Closing All Sky Calibration
+- **File → Exit** or click X button
+- Returns to main launcher
+- Data is not automatically saved
+
+---
+
 ## What's Not Implemented (Yet)
 - ⏸️ Fast mode (coming soon)
 - ⏸️ Very fast mode (SSP-5 only)
@@ -480,6 +601,17 @@ exec(open('ssp_test_serial.py').read())
 ---
 
 ## Version History
+- **0.1.4** (2026-01-27)
+  - All Sky Calibration tool for extinction coefficient calculation
+  - K'v and K'bv determination with linear regression
+  - Scatter plots with best-fit lines
+  - Transformation coefficient loading from PPparms3.txt
+  - Modal dialog behavior (returns to launcher)
+- **0.1.3** (2026-01-15)
+  - First Order Extinction star selection
+  - Real-time Alt/Az coordinate display
+  - Airmass filtering with preset buttons
+  - Location configuration dialog
 - **0.1.0** (2026-01-10)
   - Initial release
   - Slow mode and trial mode

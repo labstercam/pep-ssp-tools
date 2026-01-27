@@ -23,8 +23,11 @@ This document describes the mathematical implementation of first order atmospher
 
 ### Software Reference
 
-4. **SSPDataq v3.3.21** (Optec, Inc., 2015): `Transformation2,56.bas`, lines 1535-1550
-   - Original BASIC implementation of Hardie method used as reference
+4. **SSPDataq v3.3.21** (Optec, Inc., 2015): Multiple modules
+   - `Extinction2,56.bas`, lines 1292-1306: First Order Extinction airmass calculation
+   - `Transformation2,56.bas`, lines 1535-1550: Transformation coefficient airmass calculation
+   - `AllSky2,57.bas`, lines 1199-1212: All-sky calibration airmass calculation
+   - All use identical Hardie method implementation
 
 ---
 
@@ -476,6 +479,116 @@ Where:
 
 ---
 
+## Data Processing Steps (SSPDataq Implementation)
+
+### Count Normalization
+
+**Purpose**: Standardize all counts to common integration time and gain setting.
+
+**Algorithm** (Extinction2,56.bas lines 942-963):
+
+```python
+# Average multiple count readings (up to 4)
+count_sum = sum([count1, count2, count3, count4])
+divider = 4 - (number of zero counts)
+average_count = count_sum / divider
+
+# Normalize to standard: 10 seconds integration, scale 1×
+count_final = int(average_count × (100 / (integration_seconds × scale_factor)))
+```
+
+**Example:**
+- Raw counts: [706, 712, 706, 0]
+- Average: (706 + 712 + 706) / 3 = 708
+- Integration: 10 seconds, Scale: 1
+- Normalized: 708 × (100 / 10) = 7080 counts
+
+### Sky Background Subtraction
+
+**Purpose**: Remove sky brightness contribution using temporal interpolation.
+
+**Method**: Linear interpolation between bracketing sky measurements.
+
+**Algorithm** (Extinction2,56.bas lines 998-1041):
+
+```python
+def interpolate_sky(observation_jd, observation_filter):
+    # Search backwards for past sky measurement
+    for i in range(current_index, first_index, -1):
+        if star_name[i] in ["SKY", "SKYNEXT"] and filter[i] == observation_filter:
+            sky_past_count = count_final[i]
+            past_time = jd[i]
+            break
+    
+    # Search forwards for future sky measurement
+    for i in range(current_index, last_index):
+        if star_name[i] in ["SKY", "SKYLAST"] and filter[i] == observation_filter:
+            sky_future_count = count_final[i]
+            future_time = jd[i]
+            break
+    
+    # Linear interpolation
+    if sky_past_count and sky_future_count:
+        # Both measurements available - interpolate
+        sky_current = sky_past_count + \
+                     ((sky_future_count - sky_past_count) / (future_time - past_time)) × \
+                     (observation_jd - past_time)
+    elif sky_past_count:
+        # Only past sky available
+        sky_current = sky_past_count
+    elif sky_future_count:
+        # Only future sky available
+        sky_current = sky_future_count
+    else:
+        # Error: no sky measurements
+        raise ValueError("No SKY measurements for this filter")
+    
+    return sky_current
+
+# Apply sky subtraction
+count_net = count_final - interpolate_sky(jd_observation, filter_name)
+```
+
+**Key features:**
+- Per-filter interpolation (separate sky for U, B, V, R, I)
+- Time-weighted using Julian Date (fractional days)
+- Handles twilight, changing moon conditions
+- Graceful degradation to nearest sky if only one available
+
+**Example:**
+```
+Time      Star      Filter  Counts   JD
+02:05:00  SKYNEXT   V       52       2794.586
+02:08:24  BS477     V       3112     2794.590  ← interpolate here
+02:50:00  SKYLAST   V       49       2794.617
+
+Sky interpolated = 52 + ((49-52)/(2794.617-2794.586)) × (2794.590-2794.586)
+                 = 52 + (-3/0.031) × 0.004
+                 = 52 - 0.39 = 51.61 counts
+
+Net counts = 3112 - 51.61 = 3060.39
+```
+
+### Instrumental Magnitude Calculation
+
+**Formula**: $m_{\text{inst}} = -2.5 \log_{10}(\text{counts}) = -1.0857 \ln(\text{counts})$
+
+**Derivation:**
+$$m_{\text{inst}} = -2.5 \log_{10}(\text{counts}) = -2.5 \frac{\ln(\text{counts})}{\ln(10)} = -\frac{2.5}{2.302585} \ln(\text{counts}) = -1.0857 \ln(\text{counts})$$
+
+**Constant**: -1.0857 = -2.5 / ln(10)
+
+**Implementation** (Extinction2,56.bas line 1067):
+```basic
+m_inst = -1.0857 * log(CountNet)    ' log() is natural log in BASIC
+```
+
+**Example:**
+- Net counts: 3060.39
+- m_inst = -1.0857 × ln(3060.39) = -1.0857 × 8.026 = **-8.71 mag**
+
+---
+
 ## Glossary
 
 **Airmass (X)**: Path length through atmosphere relative to zenith path (X=1 at zenith)
@@ -505,9 +618,16 @@ Where:
 | Version | Date       | Changes |
 |---------|------------|---------|
 | 1.0     | 2026-01-20 | Initial documentation of extinction calculations |
+| 2.0     | 2026-01-27 | Complete analysis including sky subtraction, count normalization, and All Sky calibration references |
 
 ---
 
 **Document Author**: Implementation analysis for SharpCap-SSP  
 **Implementation File**: `ssp_extinction.py`  
 **Star Catalog**: `first_order_extinction_stars.csv` (175 stars from Hardie catalog)
+**Source Code Analyzed**: 
+- Extinction2,56.bas (1469 lines) - FOE module
+- AllSky2,57.bas (1366 lines) - All-sky calibration
+- Transformation2,56.bas - Transformation analysis
+
+**Analysis Status**: 100% complete and verified against SSPDataq v3.3.21 source code

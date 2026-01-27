@@ -322,47 +322,166 @@ SharpCap-SSP/Python/
 ├── ssp_comm.py             # Serial communication (COMPLETE)
 ├── ssp_config.py           # Configuration management
 ├── ssp_dialogs.py          # Configuration dialogs
+├── ssp_catalog.py          # Star catalog with 300+ targets
+├── ssp_extinction.py       # Extinction stars & airmass calculations
+├── ssp_allsky.py           # All Sky Calibration for extinction coefficients
+├── ssp_location_utils.py   # Location utilities and geodesic calculations
 ├── night_mode.py           # Night mode theme
-├── ssp_quick_test.py       # Interactive test tool (NEW)
-├── ssp_test_serial.py      # Automated test suite (NEW)
-└── TEST_README.md          # Test documentation (NEW)
+├── ssp_quick_test.py       # Interactive test tool
+├── ssp_test_serial.py      # Automated test suite
+└── TEST_README.md          # Test documentation
 ```
+
+---
+
+## 8. All Sky Calibration (ssp_allsky.py)
+**First-order extinction coefficient calculation tool**
+
+### Overview
+Complete implementation of AllSky2,57.bas functionality for calculating extinction coefficients (K'v, K'bv) from All Sky photometry observations.
+
+### Features
+- Load .raw data files with paired star/sky observations
+- Parse fixed-width format matching BASIC mid$() positions
+- Star catalog lookup from first_order_extinction_stars.csv (173 stars)
+- Airmass calculation using Hardie method
+- Sky subtraction: net_count = star_count - sky_count
+- Instrumental magnitude: v = -2.5 × log₁₀(net_count)
+- Transformation coefficients loaded from PPparms3.txt:
+  - Epsilon (ε): Line 8, for V magnitude transformation
+  - Mu (μ): Line 10, for B-V color transformation
+- Linear regression for extinction determination
+- Scatter plot with best-fit line visualization
+- Results display with zero points and standard error
+
+### User Interface (1050×730 pixels)
+**Components:**
+- Menu bar: File (Open/Save/Exit), Coefficients (Load/Save/Use/Clear), Help
+- Filename display textbox
+- Observer location display and Set Location button
+- Data grid (500×265) with columns:
+  - Star, X (airmass), V, B-V, v, (V-v)-ε(B-V), (B-V)-μ(b-v)
+- Graph area (490×265) with:
+  - X-axis: Airmass (1.0-2.5 typical range)
+  - Y-axis: Transformation column with auto-scaled tick labels
+  - Data points rendered as circles
+  - Red best-fit regression line
+  - Rotated Y-axis label
+- Control buttons:
+  - "extinction plot for v" - Show K'v calculation
+  - "extinction plot for b-v" - Show K'bv calculation
+  - "print" - Save plot image
+- Results display (680×85):
+  - K'v, ZPv, Ev (V magnitude results)
+  - K'bv, ZPbv, Ebv (B-V color results)
+  - Right-aligned at 3 decimal places
+- Analysis display (305×85):
+  - Slope, Intercept, Standard Error
+  - Courier New 9pt font for alignment
+
+### Data Processing
+
+**File Format:**
+- 4-line header (skipped)
+- Paired observations: Star line, Sky line, Star line, Sky line...
+- Fixed-width fields (BASIC positions):
+  - Date: pos 1-10 (MM-DD-YYYY)
+  - Time: pos 12-19 (HH:MM:SS)
+  - Catalog: pos 21 (F/C for calibration stars)
+  - Object: pos 26-37 (12 chars)
+  - Filter: pos 41 (V/B/U/R)
+  - Counts: pos 44-48, 51-55, 58-62 (first 3 values only)
+
+**Count Processing:**
+- Parse 3 count values per line
+- Calculate average: (cnt1 + cnt2 + cnt3) / 3.0
+- Star line: observation counts
+- Next line (sky): background counts
+- Net count = star_avg - sky_avg
+
+**Transformation Equations:**
+- For V extinction: Y = (V-v) - ε(B-V) vs X = airmass
+  - V: Standard magnitude from catalog
+  - v: Instrumental magnitude = -2.5 × log₁₀(net_count)
+  - ε: Transformation coefficient from PPparms3.txt
+  - B-V: Standard color from catalog
+- For B-V color: Y = (B-V) - μ(b-v) vs X = airmass
+  - B-V: Standard color from catalog
+  - b-v: Instrumental color = b_inst - v_inst
+  - μ: Transformation coefficient from PPparms3.txt
+
+**Linear Regression:**
+- Least-squares fit: Y = slope × X + intercept
+- Slope = extinction coefficient (K'v or K'bv)
+- Intercept = zero point (ZPv or ZPbv)
+- Standard error calculated from residuals
+
+### Airmass Calculation
+Uses AirmassCalculator from ssp_extinction.py:
+- Hardie equation: sec(z) - 0.0018167 × (sec(z) - 1) - 0.002875 × (sec(z) - 1)²
+- z = zenith distance from Alt/Az calculation
+- Requires observer location (latitude/longitude)
+- Time handling: UTC timestamps from .raw file
+- RA/Dec from star catalog
+
+### Error Handling
+- Missing stars: Printed warnings, skipped in calculations
+- Below horizon: Airmass returns None, star excluded
+- Invalid counts: Zero or negative after sky subtraction rejected
+- File format errors: Try/except with error dialogs
+- Graph refresh: Disposes old image before creating new one
+
+### Window Behavior
+- Modal dialog (ShowDialog) - returns to launcher on close
+- File → Exit sets DialogResult.OK
+- Clear all results when loading new file:
+  - Data grid cleared
+  - Result textboxes emptied
+  - Graph image disposed
+  - Buttons disabled until new calculations performed
+
+### Technical Details
+- .NET WinForms (System.Windows.Forms)
+- Bitmap graphics with GDI+ drawing
+- CSV catalog loading with UTF-8 encoding
+- PPparms3.txt: Tab-separated with "Label=Value" format
+- Configuration stored in SSPConfig (Documents\SharpCap\SSP\)
+- Default transformation coefficients: ε=-0.030, μ=1.047
 
 ---
 
 ## Next Steps
 
 ### Immediate Use
-The software is now **fully functional** for basic photometry:
+The software is now **fully functional** for photometry and data reduction:
 1. Connect to SSP photometer
 2. Set gain
 3. Select filter (manual filter changes)
 4. Collect slow mode data (1-4 intervals)
 5. Display data in real-time
 6. Save to .raw files compatible with SSPDataq reduction tools
+7. Calculate extinction coefficients using All Sky Calibration tool
 
 ### Future Enhancements
 Priority order for additional features:
-1. **Catalog loading** - Load star databases (Foe, Soe, Astar, etc.)
+1. **Second-order extinction** - More accurate atmospheric corrections
 2. **Fast mode** - High-speed photometry (0.05-10 sec)
 3. **Filter bar control** - Automatic filter changes with SSP-5
 4. **Script automation** - .ssp script file support
-5. **Data reduction** - Built-in magnitude calculations
-6. **Telescope integration** - LX200/Celestron control
+5. **Built-in data reduction** - Magnitude calculations in main window
+6. **Telescope integration** - Enhanced LX200/Celestron control
 
 ---
 
 ## Known Limitations
 
-### Current Version (0.1.0)
+### Current Version (0.1.4)
 - Slow mode only (fast/vfast not implemented)
 - Manual filter changes only (automatic filter bar not implemented)
-- No catalog loading (object names entered manually)
+- First-order extinction only (second-order requires more complex modeling)
 - No script automation
-- No telescope control
-- No data reduction/magnitude calculation
 - No flip mirror control
-- Trial and slow modes only
+- All Sky Calibration requires manual data file preparation
 
 ### Platform
 - **IronPython 2.7** required (SharpCap environment)
@@ -381,5 +500,9 @@ The SharpCap-SSP implementation successfully replicates the core SSPDataq3 funct
 - ✅ Timing and error handling preserved
 - ✅ User interface workflow similar
 - ✅ Configuration management improved
+- ✅ Star catalog integration with 300+ targets
+- ✅ First-order extinction star selection (150+ standards)
+- ✅ All Sky Calibration tool for extinction coefficient calculation
+- ✅ Real-time coordinate display (Alt/Az/Airmass)
 
-The software is **ready for astronomical observations** with SSP photometers in slow mode. Test scripts verify all critical functions. File output is compatible with existing SSPDataq reduction tools.
+The software is **ready for astronomical observations** with SSP photometers including full extinction analysis. Test scripts verify all critical functions. File output is compatible with existing SSPDataq reduction tools.

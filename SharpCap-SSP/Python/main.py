@@ -222,15 +222,23 @@ class SSPMainWindow(Form):
         launch_button = Button()
         launch_button.Text = "Launch SSPDataq3"
         launch_button.Size = Size(130, 30)
-        launch_button.Location = Point(210, 10)
+        launch_button.Location = Point(120, 10)
         launch_button.Click += self._on_launch_dataaq
         button_panel.Controls.Add(launch_button)
+        
+        # All Sky Calibration button
+        allsky_button = Button()
+        allsky_button.Text = "All Sky Calibration"
+        allsky_button.Size = Size(130, 30)
+        allsky_button.Location = Point(260, 10)
+        allsky_button.Click += self._on_launch_allsky
+        button_panel.Controls.Add(allsky_button)
         
         # Close button
         close_button = Button()
         close_button.Text = "Close"
         close_button.Size = Size(100, 30)
-        close_button.Location = Point(350, 10)
+        close_button.Location = Point(400, 10)
         close_button.Click += self._on_close_click
         button_panel.Controls.Add(close_button)
         
@@ -281,6 +289,32 @@ class SSPMainWindow(Form):
     def _restore_launcher(self):
         """Restore the launcher window from minimized state."""
         self.WindowState = FormWindowState.Normal
+    
+    def _on_launch_allsky(self, sender, event):
+        """Handle launch All Sky Calibration button click."""
+        try:
+            # Ensure module path is set
+            import sys
+            script_dir = System.IO.Path.GetDirectoryName(__file__) if '__file__' in dir() else System.IO.Directory.GetCurrentDirectory()
+            if script_dir not in sys.path:
+                sys.path.append(script_dir)
+            
+            import ssp_allsky
+            
+            # Minimize the launcher window
+            self.WindowState = FormWindowState.Minimized
+            
+            # Show the all sky calibration window
+            ssp_allsky.show_allsky_calibration_window()
+            
+            # Restore launcher after closing
+            self._restore_launcher()
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            MessageBox.Show("Error launching All Sky Calibration window:\n\n" + str(e) + "\n\nDetails:\n" + error_detail, 
+                          "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            self._restore_launcher()
         
     def _on_close_click(self, sender, event):
         """Handle close button click."""
