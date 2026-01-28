@@ -258,6 +258,8 @@ class AllSkyCalibrationDialog(Form):
         self.epsilon = 0.0  # Transformation coefficient for V
         self.mu = 0.0       # Transformation coefficient for B-V
         self.star_data = []  # List of dicts with star data for regression
+        self.raw_file_data = []  # Complete raw file data with processing status
+        self.current_filename = None  # Track loaded filename
         
         # Saved constants from PPparms (lines 29-36)
         self.saved_ZPv = 0.0   # Zero-point for v (line 29)
@@ -466,10 +468,19 @@ class AllSkyCalibrationDialog(Form):
         self.print_button.Enabled = False
         main_panel.Controls.Add(self.print_button)
         
+        # Raw data view button (below the other buttons)
+        self.view_raw_button = Button()
+        self.view_raw_button.Text = "View Raw File Data"
+        self.view_raw_button.Location = Point(button_x, button_y + 35)
+        self.view_raw_button.Size = Size(225, 25)
+        self.view_raw_button.Click += self._on_view_raw_data
+        self.view_raw_button.Enabled = False
+        main_panel.Controls.Add(self.view_raw_button)
+        
         # Results groupbox (below buttons and graph)
         results_group = GroupBox()
         results_group.Text = "Results"
-        results_group.Location = Point(10, 350)
+        results_group.Location = Point(10, 390)
         results_group.Size = Size(680, 85)
         
         # First row of results
@@ -675,6 +686,8 @@ class AllSkyCalibrationDialog(Form):
             self.raw_data = []
             self.star_data = []  # Clear star data from previous file
             self.regression_data = []  # Clear regression data
+            self.raw_file_data = []  # Clear raw file data
+            self.current_filename = filepath
             
             # Clear results display
             self.kv_text.Text = ""
@@ -695,6 +708,7 @@ class AllSkyCalibrationDialog(Form):
             self.show_kv_button.Enabled = False
             self.show_kbv_button.Enabled = False
             self.print_button.Enabled = False
+            self.view_raw_button.Enabled = False
             
             # Read file
             with open(filepath, 'r') as f:
@@ -819,7 +833,21 @@ class AllSkyCalibrationDialog(Form):
                         'filter': filter_name,
                         'count': count_final,  # Normalized count matching BASIC calculation
                         'time': obs_time,
-                        'jd': JD  # Julian Date for interpolation
+                        'jd': JD,  # Julian Date for interpolation
+                        'raw_line': line,  # Store original raw line
+                        'date_str': date_str,
+                        'time_str': time_str,
+                        'count1': cnt1,
+                        'count2': cnt2,
+                        'count3': cnt3,
+                        'count4': cnt4,
+                        'integration': integration,
+                        'scale': scale,
+                        'used': False,  # Will be marked True if used in calculations
+                        'removed_reason': None,  # Track why removed
+                        'calculated_x': None,  # Airmass if calculated
+                        'calculated_y_v': None,  # Y value for V plot
+                        'calculated_y_bv': None  # Y value for B-V plot
                     }
                     all_records.append(record)
                     
@@ -836,6 +864,10 @@ class AllSkyCalibrationDialog(Form):
                     MessageBoxIcon.Warning
                 )
                 return
+            
+            # Save raw file data immediately for marking during processing
+            # Sort by date/time for viewer display
+            self.raw_file_data = sorted(all_records, key=lambda r: r['jd'])
             
             # Now process star observations with sky subtraction
             # Following AllSky2,57.bas [IREX_RawFile] logic exactly
@@ -945,6 +977,7 @@ class AllSkyCalibrationDialog(Form):
                 star = self.star_catalog.get_star(star_name)
                 if star is None:
                     print("Warning: Star '{0}' not found in catalog".format(star_name))
+                    self._mark_raw_records_removed(star_name, "Not in catalog")
                     continue
                 
                 # Calculate airmass using observed time
@@ -953,6 +986,7 @@ class AllSkyCalibrationDialog(Form):
                 
                 if airmass is None:
                     print("Warning: Star '{0}' was below horizon at observation time".format(star_name))
+                    self._mark_raw_records_removed(star_name, "Below horizon")
                     continue
                 
                 # Calculate sky-subtracted counts
@@ -961,6 +995,7 @@ class AllSkyCalibrationDialog(Form):
                 
                 if net_count <= 0:
                     print("Warning: Star '{0}' has zero or negative counts after sky subtraction".format(star_name))
+                    self._mark_raw_records_removed(star_name, "Zero/negative counts")
                     continue
                 
                 # Calculate instrumental magnitude: v = -2.5 * log10(net_count)
@@ -987,6 +1022,9 @@ class AllSkyCalibrationDialog(Form):
             
             # After processing all observations, aggregate by star and populate grid
             self._populate_grid_from_data()
+            
+            # Enable raw data view button (data already saved earlier)
+            self.view_raw_button.Enabled = True
             
         except Exception as e:
             error_detail = traceback.format_exc()
@@ -1095,6 +1133,9 @@ class AllSkyCalibrationDialog(Form):
                 'trans_col5': trans_col5,  # Y-axis for K'v plot (always available)
                 'trans_col6': trans_col6   # Y-axis for K'bv plot (only if B available)
             })
+            
+            # Mark raw file records as used and store calculated values
+            self._mark_raw_records_used(star_name, avg_airmass, trans_col5, trans_col6)
         
         # Show results
         processed_count = len(self.regression_data)
@@ -1140,6 +1181,49 @@ class AllSkyCalibrationDialog(Form):
                 self.show_kbv_button.Enabled = False
             
             MessageBox.Show(msg, "Data Loaded", MessageBoxButtons.OK, MessageBoxIcon.Information)
+    
+    def _mark_raw_records_used(self, star_name, airmass, trans_col5, trans_col6):
+        """Mark raw file records as used in calculations and store X/Y values."""
+        if not hasattr(self, 'raw_file_data') or not self.raw_file_data:
+            return
+        # Find all records for this star and mark them as used
+        for record in self.raw_file_data:
+            if record['object'].strip() == star_name.strip():
+                if record['catalog'] in ['F', 'C']:  # Only calibration stars
+                    record['used'] = True
+                    record['calculated_x'] = airmass
+                    record['calculated_y_v'] = trans_col5
+                    record['calculated_y_bv'] = trans_col6
+    
+    def _mark_raw_records_removed(self, star_name, reason):
+        """Mark raw file records as removed with reason."""
+        if not hasattr(self, 'raw_file_data') or not self.raw_file_data:
+            return
+        for record in self.raw_file_data:
+            if record['object'].strip() == star_name.strip():
+                if record['catalog'] in ['F', 'C']:  # Only calibration stars
+                    if not record['used']:  # Don't overwrite if already marked as used
+                        record['removed_reason'] = reason
+    
+    def _on_view_raw_data(self, sender, event):
+        """Show raw file data viewer dialog."""
+        if not self.raw_file_data:
+            MessageBox.Show("No raw file data loaded.", "No Data",
+                          MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        
+        try:
+            viewer = RawFileDataViewer(self.raw_file_data, self.current_filename)
+            viewer.ShowDialog()
+        except Exception as e:
+            error_detail = traceback.format_exc()
+            MessageBox.Show(
+                "Error showing raw data viewer:\n\n" + str(e) +
+                "\n\nDetails:\n" + error_detail,
+                "Error",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            )
     
     def _on_save_plot(self, sender, event):
         """Handle Save Plot menu item."""
@@ -1510,6 +1594,164 @@ class AllSkyCalibrationDialog(Form):
         self.graph_box.Image = bmp
         
         self.print_button.Enabled = True
+
+
+class RawFileDataViewer(Form):
+    """Dialog to view raw file data with processing status."""
+    
+    def __init__(self, raw_data, filename):
+        """
+        Initialize raw data viewer.
+        
+        Args:
+            raw_data: List of raw file records with processing status
+            filename: Name of the raw file
+        """
+        self.raw_data = raw_data
+        self.filename = filename
+        
+        self.Text = "Raw File Data - {0}".format(os.path.basename(filename) if filename else "Unknown")
+        self.Size = Size(1200, 600)
+        self.StartPosition = FormStartPosition.CenterParent
+        self.FormBorderStyle = FormBorderStyle.Sizable
+        
+        self._setup_ui()
+        self._populate_grid()
+    
+    def _setup_ui(self):
+        """Set up the UI components."""
+        # Legend at top
+        legend_panel = Panel()
+        legend_panel.Dock = DockStyle.Top
+        legend_panel.Height = 85
+        legend_panel.BackColor = Color.WhiteSmoke
+        
+        legend_label = Label()
+        legend_label.Text = ("Data Display Legend:\n" +
+                           "• Normal text = Data included in calculations\n" +
+                           "• Red strikethrough = Data excluded (star not in catalog, below horizon, zero counts, etc.)\n" +
+                           "• X and Y columns show calculated values for data used in extinction plots")
+        legend_label.Location = Point(10, 5)
+        legend_label.Size = Size(1150, 75)
+        legend_label.Font = Font("Arial", 9)
+        legend_label.AutoSize = False
+        legend_panel.Controls.Add(legend_label)
+        
+        # Close button at bottom
+        button_panel = Panel()
+        button_panel.Dock = DockStyle.Bottom
+        button_panel.Height = 45
+        
+        close_btn = Button()
+        close_btn.Text = "Close"
+        close_btn.Size = Size(100, 30)
+        close_btn.Location = Point(550, 7)
+        close_btn.Click += lambda s, e: self.Close()
+        button_panel.Controls.Add(close_btn)
+        
+        # Middle panel to contain the grid
+        grid_panel = Panel()
+        grid_panel.Dock = DockStyle.Fill
+        
+        # Data grid
+        self.grid = DataGridView()
+        self.grid.Dock = DockStyle.Fill
+        self.grid.AllowUserToAddRows = False
+        self.grid.AllowUserToDeleteRows = False
+        self.grid.ReadOnly = True
+        self.grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect
+        self.grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells
+        self.grid.RowHeadersVisible = False
+        
+        # Add columns
+        self.grid.Columns.Add("Date", "Date")
+        self.grid.Columns.Add("Time", "Time")
+        self.grid.Columns.Add("Cat", "Cat")
+        self.grid.Columns.Add("Object", "Object")
+        self.grid.Columns.Add("Filter", "Flt")
+        self.grid.Columns.Add("Count1", "Cnt1")
+        self.grid.Columns.Add("Count2", "Cnt2")
+        self.grid.Columns.Add("Count3", "Cnt3")
+        self.grid.Columns.Add("Count4", "Cnt4")
+        self.grid.Columns.Add("FinalCount", "Final")
+        self.grid.Columns.Add("X", "X (Airmass)")
+        self.grid.Columns.Add("Y_V", "Y (V plot)")
+        self.grid.Columns.Add("Y_BV", "Y (B-V plot)")
+        self.grid.Columns.Add("Status", "Status")
+        
+        grid_panel.Controls.Add(self.grid)
+        
+        # Add controls to form in correct order
+        self.Controls.Add(grid_panel)
+        self.Controls.Add(button_panel)
+        self.Controls.Add(legend_panel)
+    
+    def _populate_grid(self):
+        """Populate grid with raw file data."""
+        for record in self.raw_data:
+            row_idx = self.grid.Rows.Add()
+            row = self.grid.Rows[row_idx]
+            
+            # Basic data
+            row.Cells[0].Value = record['date_str']
+            row.Cells[1].Value = record['time_str']
+            row.Cells[2].Value = record['catalog']
+            row.Cells[3].Value = record['object']
+            row.Cells[4].Value = record['filter']
+            
+            # Individual counts - mark with strikethrough if zero
+            for i, cnt in enumerate([record['count1'], record['count2'], 
+                                     record['count3'], record['count4']]):
+                cell = row.Cells[5 + i]
+                cell.Value = str(cnt) if cnt > 0 else "0"
+                if cnt == 0:
+                    cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                    cell.Style.ForeColor = Color.Red
+            
+            # Final count
+            row.Cells[9].Value = str(record['count'])
+            
+            # Calculated values (X and Y)
+            if record['used']:
+                # Show calculated X (airmass)
+                if record['calculated_x'] is not None:
+                    row.Cells[10].Value = "{0:.3f}".format(record['calculated_x'])
+                
+                # Show Y values
+                if record['calculated_y_v'] is not None:
+                    row.Cells[11].Value = "{0:.3f}".format(record['calculated_y_v'])
+                
+                if record['calculated_y_bv'] is not None:
+                    row.Cells[12].Value = "{0:.3f}".format(record['calculated_y_bv'])
+                
+                row.Cells[13].Value = "Used in calculations"
+            else:
+                row.Cells[10].Value = ""
+                row.Cells[11].Value = ""
+                row.Cells[12].Value = ""
+                
+                # Determine why not used
+                obj_upper = record['object'].strip().upper()
+                if obj_upper in ["SKY", "SKYNEXT", "SKYLAST"]:
+                    row.Cells[13].Value = "Sky reading"
+                elif record['catalog'] not in ['F', 'C']:
+                    row.Cells[13].Value = "Not calibration star"
+                    # Apply strikethrough to entire row
+                    for cell in row.Cells:
+                        cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                        cell.Style.ForeColor = Color.Red
+                elif record.get('removed_reason'):
+                    row.Cells[13].Value = record['removed_reason']
+                    # Apply strikethrough to entire row
+                    for cell in row.Cells:
+                        cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                        cell.Style.ForeColor = Color.Red
+                else:
+                    row.Cells[13].Value = "Not used (see log)"
+                    # Apply strikethrough to entire row
+                    for cell in row.Cells:
+                        cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                        cell.Style.ForeColor = Color.Red
 
 
 # Entry point for standalone testing
