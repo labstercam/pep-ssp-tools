@@ -371,6 +371,7 @@ Complete implementation of AllSky2,57.bas functionality for calculating extincti
   - "extinction plot for v" - Show K'v calculation
   - "extinction plot for b-v" - Show K'bv calculation
   - "print" - Save plot image
+  - "View Raw File Data" - Display complete raw file with processing status
 - Results display (680×85):
   - K'v, ZPv, Ev (V magnitude results)
   - K'bv, ZPbv, Ebv (B-V color results)
@@ -448,6 +449,39 @@ Standard error:
 - Float type enforcement for numerical stability
 
 **Verification:** All regression formulas verified identical. Both implementations produce mathematically equivalent results matching standard statistical textbooks.
+
+**Raw Data File Viewer:**
+
+Provides complete transparency into data processing decisions through a dedicated viewer dialog:
+
+**Features:**
+- **1200×600 sizable window** displaying all raw file observations
+- **Chronologically sorted** by Julian Date for temporal analysis
+- **Color-coded display:**
+  - Normal black text = Data included in calculations
+  - Red strikethrough = Data excluded from analysis
+  - Zero counts highlighted with red strikethrough in individual count cells
+- **13-column data grid:**
+  - Date, Time, Catalog code, Object name, Filter
+  - Count1-4 (individual readings with zero detection)
+  - Final Count (normalized)
+  - X (Airmass) - Calculated airmass for observations used in regression
+  - Y (V plot) - (V-v)-ε(B-V) transformation value
+  - Y (B-V plot) - (B-V)-μ(b-v) transformation value
+  - Status - Explanation of why data was included or excluded
+- **Exclusion reasons tracked:**
+  - "Not in catalog" - Star not found in extinction star catalog
+  - "Below horizon" - Star was below horizon at observation time
+  - "Zero/negative counts" - Invalid counts after sky subtraction
+  - "Sky reading" - SKY/SKYNEXT/SKYLAST observations
+  - "Not calibration star" - Non-F/C catalog codes
+
+**Benefits:**
+- Full transparency: See exactly which data was used in extinction calculations
+- Quality control: Verify zero count detection and sky subtraction working correctly
+- Debugging: Understand why specific observations were included or excluded
+- Traceability: View calculated X/Y values that went into regression plots
+- Educational: Learn the extinction calculation workflow step-by-step
 
 **File Format:**
 - 4-line header (skipped)

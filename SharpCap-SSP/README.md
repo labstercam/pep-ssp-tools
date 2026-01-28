@@ -56,6 +56,12 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
   - Linear regression with scatter plot and best-fit line
   - Transformation coefficients (epsilon, mu) loaded from PPparms3.txt
   - Results display with zero points and standard error
+  - **Raw Data Viewer**: View complete raw file with processing status
+    - Chronologically sorted observations
+    - Color-coded: normal text for used data, red strikethrough for excluded
+    - Shows calculated X (airmass) and Y values for regression points
+    - Individual count values with zero highlighting
+    - Removal reasons displayed (not in catalog, below horizon, zero counts)
   - Compatible with AllSky2,57.bas format
   - **VERIFIED**: All 12 processing steps match BASIC implementation exactly
   - Enhanced: Accepts V-only observations for improved flexibility
