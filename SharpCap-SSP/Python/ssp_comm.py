@@ -195,6 +195,71 @@ class SSPCommunicator:
         except Exception as e:
             return (False, None, "Error getting count: " + str(e))
     
+    def set_integration(self, integration_ms):
+        """Set photometer integration time.
+        
+        Implements integration time setting from SSPDataq (lines 1599-1633):
+        1. Send SInnnn command where nnnn is a 4-digit integration value
+        2. Wait for "!" acknowledgment (up to 5 seconds)
+        
+        Integration time mapping (matches SSPDataq [SELECT_INTEG.Click]):
+        - 20ms -> SI0002
+        - 50ms -> SI0005
+        - 100ms -> SI0010
+        - 500ms -> SI0050
+        - 1000ms -> SI0100
+        - 5000ms -> SI0500
+        - 10000ms -> SI1000
+        
+        Args:
+            integration_ms: Integration time in milliseconds (20, 50, 100, 500, 1000, 5000, or 10000)
+            
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        if not self.is_connected:
+            return (False, "Not connected")
+        
+        # Map integration time to command codes (matches SSPDataq)
+        if integration_ms == 20:
+            command = "SI0002"
+        elif integration_ms == 50:
+            command = "SI0005"
+        elif integration_ms == 100:
+            command = "SI0010"
+        elif integration_ms == 500:
+            command = "SI0050"
+        elif integration_ms == 1000:
+            command = "SI0100"
+        elif integration_ms == 5000:
+            command = "SI0500"
+        elif integration_ms == 10000:
+            command = "SI1000"
+        else:
+            return (False, "Invalid integration time. Must be 20, 50, 100, 500, 1000, 5000, or 10000 ms")
+        
+        try:
+            self._clear_buffer()
+            self._write(command)
+            
+            # Wait for acknowledgment (matches original [WaitForAck] routine)
+            ack_received = False
+            for i in range(100):
+                time.sleep(0.05)  # 50ms pause (matches original)
+                if self.port.BytesToRead > 0:
+                    response = self._read_available()
+                    if "!" in response:
+                        ack_received = True
+                        break
+            
+            if ack_received:
+                return (True, "Integration time set to " + str(integration_ms) + " ms")
+            else:
+                return (False, "No acknowledgment received from SSP")
+                
+        except Exception as e:
+            return (False, "Error setting integration time: " + str(e))
+    
     def set_gain(self, gain_value):
         """Set photometer gain.
         

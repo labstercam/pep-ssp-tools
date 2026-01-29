@@ -90,6 +90,9 @@ class SSPDataAcquisitionWindow(Form):
         # Flag to prevent recursion during filter combo updates
         self.updating_filter_combo = False
         
+        # Flag to prevent recursion during object combo updates
+        self.updating_object_combo = False
+        
         # Store currently selected target triple for GOTO functionality
         self.current_target = None
         
@@ -1220,7 +1223,11 @@ class SSPDataAcquisitionWindow(Form):
             object_val = actual_name  # Use actual name without (Comp) or (Check)
         
         # Get catalog code (first letter)
-        catalog_code = catalog_val[0].upper() if len(catalog_val) > 0 else "?"
+        # For SKY objects, catalog should be blank (matches SSPDataq lines 1948-1951)
+        if object_val in ["SKY", "SKYNEXT", "SKYLAST"]:
+            catalog_code = " "
+        else:
+            catalog_code = catalog_val[0].upper() if len(catalog_val) > 0 else "?"
         
         # Check for trial mode
         if mode_val.lower() == "trial":
@@ -1234,11 +1241,41 @@ class SSPDataAcquisitionWindow(Form):
                           MessageBoxButtons.OK, MessageBoxIcon.Information)
             return
         
+        # === CRITICAL: Set ALL SSP parameters before data collection ===
+        # This ensures SSP hardware is synchronized with UI settings
+        # Matches SSPDataq behavior where settings are sent when changed
+        
+        # Set integration time on photometer (must be done before counts)
+        success, msg = self.comm.set_integration(integ_ms)
+        if not success:
+            self._update_status("Error setting integration time: " + msg)
+            MessageBox.Show("Failed to set integration time:\n" + msg, "SSP Configuration Error",
+                          MessageBoxButtons.OK, MessageBoxIcon.Error)
+            return
+        
         # Set gain on photometer
         success, msg = self.comm.set_gain(gain_val)
         if not success:
             self._update_status("Error setting gain: " + msg)
+            MessageBox.Show("Failed to set gain:\n" + msg, "SSP Configuration Error",
+                          MessageBoxButtons.OK, MessageBoxIcon.Error)
             return
+        
+        # Set filter position (if automated mode)
+        auto_manual = self.config.get('auto_manual', 'M')
+        if auto_manual == 'A' and filter_val != "" and filter_val.lower() != "home":
+            # Get filter position from current combo selection
+            filter_position = self.filter_combo.SelectedIndex + 1
+            if 1 <= filter_position <= 6:
+                success, retry_count, msg = self.comm.select_filter(filter_position)
+                if not success:
+                    self._update_status("Warning: Filter position not confirmed - " + msg)
+                    # Don't abort - allow user to continue (filter might already be in position)
+                    result = MessageBox.Show(
+                        "Could not confirm filter position:\n" + msg + "\n\nContinue anyway?",
+                        "Filter Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+                    if result == DialogResult.No:
+                        return
         
         # Disable button during collection
         self.start_button.Enabled = False
@@ -1307,6 +1344,12 @@ class SSPDataAcquisitionWindow(Form):
             gain_val: Gain value
             integ_ms: Integration time in milliseconds
         """
+        # Set integration time
+        success, msg = self.comm.set_integration(integ_ms)
+        if not success:
+            self._update_status("Error setting integration time: " + msg)
+            return
+        
         # Set gain
         success, msg = self.comm.set_gain(gain_val)
         if not success:
@@ -1461,6 +1504,28 @@ class SSPDataAcquisitionWindow(Form):
         if result == DialogResult.OK and dialog.selected_target:
             target = dialog.selected_target
             
+            # Clean up extinction stars and restore normal object list
+            # Remove all items except the base ones (New Object, SKY, SKYNEXT, SKYLAST, CATALOG)
+            self.updating_object_combo = True
+            
+            base_items = ["New Object", "SKY", "SKYNEXT", "SKYLAST", "CATALOG"]
+            items_to_remove = []
+            
+            # Find items that need to be removed
+            for i in range(self.object_combo.Items.Count):
+                item_text = str(self.object_combo.Items[i])
+                if item_text not in base_items:
+                    items_to_remove.append(item_text)
+            
+            # Remove non-base items
+            for item in items_to_remove:
+                self.object_combo.Items.Remove(item)
+            
+            # Clear star name mapping for removed items
+            for item in items_to_remove:
+                if item in self.star_name_map:
+                    del self.star_name_map[item]
+            
             # Store the selected target for GOTO functionality
             self.current_target = target
             
@@ -1512,6 +1577,9 @@ class SSPDataAcquisitionWindow(Form):
             # Select the variable star by default
             self.object_combo.SelectedIndex = var_index
             
+            # Re-enable event handling
+            self.updating_object_combo = False
+            
             # Auto-set catalog to Var
             self._set_catalog_for_object(var_display)
             
@@ -1520,6 +1588,10 @@ class SSPDataAcquisitionWindow(Form):
     
     def _on_object_changed(self, sender, event):
         """Handle object selection change - auto-set catalog type."""
+        # Prevent recursion when programmatically updating combo
+        if self.updating_object_combo:
+            return
+        
         selected = self.object_combo.Text
         self._set_catalog_for_object(selected)
     
@@ -1529,6 +1601,13 @@ class SSPDataAcquisitionWindow(Form):
         Args:
             object_name: The display name of the selected object
         """
+        # Handle SKY objects - catalog should remain blank/unchanged
+        # Matches SSPDataq behavior (lines 1948-1951)
+        if object_name in ["SKY", "SKYNEXT", "SKYLAST"]:
+            # For SKY objects, catalog is set to blank in the data output
+            # Don't change catalog combo - let user keep current selection
+            return
+        
         if object_name in self.star_name_map:
             actual_name, catalog_type = self.star_name_map[object_name]
             
@@ -1619,12 +1698,38 @@ class SSPDataAcquisitionWindow(Form):
             self.current_target_label.ForeColor = Color.DarkBlue
             self.current_target_label.Font = Font("Arial", 9, FontStyle.Bold)
             
-            # Since extinction stars don't have comp/check, clear the object combo
-            self.updating_filter_combo = True
-            self.object_combo.Items.Clear()
+            # Clean up previously selected target stars (including comp/check)
+            # Remove all items except the base ones (New Object, SKY, SKYNEXT, SKYLAST, CATALOG)
+            self.updating_object_combo = True
+            
+            base_items = ["New Object", "SKY", "SKYNEXT", "SKYLAST", "CATALOG"]
+            items_to_remove = []
+            
+            # Find items that need to be removed (all non-base items)
+            for i in range(self.object_combo.Items.Count):
+                item_text = str(self.object_combo.Items[i])
+                if item_text not in base_items:
+                    items_to_remove.append(item_text)
+            
+            # Remove non-base items (previous target stars and extinction stars)
+            for item in items_to_remove:
+                self.object_combo.Items.Remove(item)
+            
+            # Clear star name mapping for removed items
+            for item in items_to_remove:
+                if item in self.star_name_map:
+                    del self.star_name_map[item]
+            
+            # Add the new extinction star
             self.object_combo.Items.Add(star.name)
-            self.object_combo.SelectedIndex = 0
-            self.updating_filter_combo = False
+            
+            # Select the extinction star
+            for i in range(self.object_combo.Items.Count):
+                if str(self.object_combo.Items[i]) == star.name:
+                    self.object_combo.SelectedIndex = i
+                    break
+            
+            self.updating_object_combo = False
             
             # Set catalog combo to "Foe" for first order extinction
             for i in range(self.catalog_combo.Items.Count):
@@ -1676,17 +1781,6 @@ class SSPDataAcquisitionWindow(Form):
         ra_hours = star.ra_hours + star.ra_minutes/60.0 + star.ra_seconds/3600.0
         dec_degrees = star.dec_degrees_decimal
         
-        # Confirm before slewing
-        msg = "%s Star: %s\n\nRA:  %s\nDec: %s\n\nSlew telescope to this position?" % (
-            star_type, star.name,
-            star.ra_string(), star.dec_string())
-        
-        result = MessageBox.Show(msg, "Confirm GOTO",
-                                MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-        
-        if result != DialogResult.Yes:
-            return
-        
         # Try to slew telescope using SharpCap API
         try:
             # Verify CancellationToken is available (should always be true in SharpCap)
@@ -1722,10 +1816,6 @@ class SSPDataAcquisitionWindow(Form):
                 
                 print("GOTO completed: RA %.4fh, Dec %.4f°" % (ra_hours, dec_degrees))
                 self._update_status("GOTO completed to %s: %s" % (star_type, star.name))
-                
-                MessageBox.Show("Telescope has slewed to %s: %s\n\nRA:  %s\nDec: %s" % (
-                    star_type, star.name, star.ra_string(), star.dec_string()),
-                    "GOTO Complete", MessageBoxButtons.OK, MessageBoxIcon.Information)
                 
             else:
                 # No mount control - offer manual GOTO with clipboard
