@@ -72,17 +72,33 @@ SharpCap-SSP/
 2. **Create new release:**
    - Click "Releases" (right sidebar)
    - Click "Create a new release"
-3`
+   - Tag version: `v0.1.4`
    - Target: `main` branch
-   - Release title: `SharpCap-SSP v0.1.3 - First Order Extinction & Coordinate Display`
+   - Release title: `SharpCap-SSP v0.1.4 - All Sky Calibration & Bug Fixes`
 
 4. **Write release notes:**
    ```markdown
-   # SharpCap-SSP v0.1.3 - First Order Extinction & Coordinate Display
+   # SharpCap-SSP v0.1.4 - All Sky Calibration & Bug Fixes
    
    Control software for Optec SSP-3a/SSP-5a photometers with SharpCap integration.
    
-   ## 🎯 Major Features in v0.1.3
+   ## 🎯 Major Features in v0.1.4
+   
+   ### All Sky Calibration Tool
+   - ✅ **Raw data file viewer** - View and analyze extinction observation data
+   - ✅ **Extinction coefficient calculation** - First order atmospheric extinction analysis
+   - ✅ **Multi-filter support** - Calculate extinction for each filter independently
+   - ✅ **Data visualization** - Plot magnitude vs. airmass with linear regression
+   - ✅ **Quality metrics** - R² values and slope uncertainty for each fit
+   - ✅ **Export results** - Save extinction coefficients and analysis plots
+   
+   ### Bug Fixes & Improvements
+   - 🐛 **Integration time handling** - Fixed issues with SSP settings synchronization
+   - 🐛 **Data acquisition reliability** - Improved error handling and recovery
+   - 🐛 **Raw data sky handling** - Corrected sky reading processing in All Sky mode
+   - ✨ **Enhanced testing** - Added integration test scripts for validation
+   
+   ## 🎯 Previous Features (v0.1.3)
    
    ### First Order Extinction Star Selection
    - ✅ **Extinction standard star catalog** - 150+ standards from Landolt, Cousins, & Graham catalogs
@@ -110,7 +126,9 @@ SharpCap-SSP/
    - 🐛 Fixed auto-filter not applying on extinction dialog open
    - 🐛 Fixed button highlighting not visible in normal and night modes
    
-   ## 📋 Previous Features (v0.1.2)-3a/SSP-5a photometers with SharpCap integration.
+   ## 📋 Previous Features (v0.1.2)
+   
+   Control software for Optec SSP-3a/SSP-5a photometers with SharpCap integration.
    
    ## 🎯 Major Features in v0.1.2
    
@@ -144,7 +162,7 @@ SharpCap-SSP/
    
    ## Installation
    
-   **Download:** [SharpCap-SSP-v0.1.2.zip](link-will-be-auto-generated)
+   **Download:** [SharpCap-SSP-v0.1.4.zip](link-will-be-auto-generated)
    
    ### Quick Start:
    1. Download and extract the ZIP file
@@ -230,7 +248,7 @@ SharpCap-SSP/
    ```
 
 5. **Upload ZIP file:**
-   - Create `SharpCap-SSP-v0.1.2.zip` with structure above
+   - Run `create_release_zip.ps1` to create `SharpCap-SSP-v0.1.4.zip`
    - Drag and drop to "Attach binaries" section
 
 6. **Set as latest release:**
@@ -242,24 +260,34 @@ SharpCap-SSP/
 
 The release will be available at:
 - Direct link: `https://github.com/labstercam/pep-ssp-tools/releases/latest`
-- Download link: `https://github.com/labstercam/pep-ssp-tools/releases/download/v0.1.2/SharpCap-SSP-v0.1.2.zip`
+- Download link: `https://github.com/labstercam/pep-ssp-tools/releases/download/v0.1.4/SharpCap-SSP-v0.1.4.zip`
 
 Update README.md with this download link.
 
 ---
 
-## Release Checklist for v0.1.2
+## Release Checklist for v0.1.4
 
 Before creating the release, verify:
 
-- [ ] All version numbers updated to 0.1.2 in:
+- [ ] All version numbers updated to 0.1.4 in:
   - [ ] main.py
   - [ ] ssp_dataaq.py
   - [ ] ssp_comm.py
   - [ ] ssp_config.py
   - [ ] ssp_dialogs.py
   - [ ] ssp_catalog.py
+  - [ ] ssp_extinction.py
+  - [ ] ssp_allsky.py
+  - [ ] ssp_location_utils.py
   - [ ] night_mode.py
+
+- [ ] All Sky calibration tested:
+  - [ ] Raw data file viewer loads .raw files
+  - [ ] Extinction coefficients calculated correctly
+  - [ ] Plots display magnitude vs. airmass
+  - [ ] R² values and uncertainties shown
+  - [ ] Results can be exported
 
 - [ ] Filter control tested:
   - [ ] Auto mode with automated slider (if available)
@@ -277,10 +305,10 @@ Before creating the release, verify:
   - [ ] Coordinate sync from SharpCap works
 
 - [ ] Documentation updated:
-  - [ ] QUICK_START.md includes filter mode configuration
-  - [ ] FILTER_CONTROL.md updated with hardware detection info
-  - [ ] README.md reflects v0.1.2 features
-  - [ ] RELEASE_INSTRUCTIONS.md has v0.1.2 notes
+  - [ ] QUICK_START.md includes All Sky calibration instructions
+  - [ ] IMPLEMENTATION_SUMMARY.md updated with latest features
+  - [ ] README.md reflects v0.1.4 features
+  - [ ] RELEASE_INSTRUCTIONS.md has v0.1.4 notes
 
 - [ ] Star catalog functional:
   - [ ] Search by name works
