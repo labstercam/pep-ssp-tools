@@ -20,7 +20,9 @@ $files = @(
     "Python\SSP.ico",
     "Python\starparm_latest.csv",
     "Python\first_order_extinction_stars.csv",
-    "README.md"
+    "README.md",
+    "QUICK_START.md",
+    "IMPLEMENTATION_SUMMARY.md"
 )
 
 $zipPath = "SharpCap-SSP-v0.1.4.zip"

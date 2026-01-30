@@ -27,6 +27,8 @@ Package the following files from `SharpCap-SSP/Python/`:
 - QUICK_INSTALL.txt
 - SETUP.md
 - README.md (copy from parent directory)
+- QUICK_START.md (copy from parent directory)
+- IMPLEMENTATION_SUMMARY.md (copy from parent directory)
 
 **Assets:**
 - SSP.ico
@@ -41,6 +43,8 @@ SharpCap-SSP/
 ├── QUICK_INSTALL.txt          <-- Read this first!
 ├── README.md
 ├── SETUP.md
+├── QUICK_START.md
+├── IMPLEMENTATION_SUMMARY.md
 ├── main.py
 ├── ssp_dataaq.py
 ├── ssp_comm.py
@@ -48,6 +52,8 @@ SharpCap-SSP/
 ├── ssp_dialogs.py
 ├── ssp_catalog.py
 ├── ssp_extinction.py
+├── ssp_allsky.py
+├── ssp_location_utils.py
 ├── night_mode.py
 ├── SSP.ico
 ├── starparm_latest.csv
