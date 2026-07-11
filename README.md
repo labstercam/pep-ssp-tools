@@ -23,6 +23,11 @@ https://github.com/labstercam/pep-ssp-tools/tree/main/SharpCap-SSP
 
 <img width="1087" height="337" alt="image" src="https://github.com/user-attachments/assets/2c65aa47-65c9-4127-acf0-3284eee6c040" />
 
+## ARDUINO_SSPCARD
+Arduino-based replacement for SSPCARD hardware to control SSP5A photometers. Provides modern, open-source hardware alternative with CNC shield stepper control and SSP protocol compatibility.
+
+https://github.com/labstercam/pep-ssp-tools/tree/main/ARDUINO_SSPCARD
+
 ## Optec SSPDataq 3 and 4
 The legacy software from Optec.  https://www.optecinc.com/downloads/legacy/sspdataq/ Uses LibertyBasic
 
