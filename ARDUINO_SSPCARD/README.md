@@ -1,4 +1,4 @@
-e filter# ARDUINO_SSPCARD - Arduino-based SSPCARD Replacement
+# ARDUINO_SSPCARD - Arduino-based SSPCARD Replacement
 
 This folder contains all Arduino development files for the SSP5A photometer controller replacement project.
 
@@ -6,7 +6,7 @@ This folder contains all Arduino development files for the SSP5A photometer cont
 
 The Arduino SSPCARD replacement project provides a modern, open-source alternative to the original SSPCARD hardware for controlling SSP5A photometers. This implementation uses an Arduino Uno/Nano with a CNC Shield for stepper motor control and serial communication compatibility with SSPData3 software.
 
-It is still a work in progress. Currently it can read pulse counts and move the stepper motor but still need to calibrate the stepper motor drivers to move teh sliders by the correct amount. 
+It is still a work in progress. Currently it can read pulse counts and move the stepper motor but still need to calibrate the stepper motor drivers to move the sliders by the correct amount. 
 
 ## Quick Start
 
