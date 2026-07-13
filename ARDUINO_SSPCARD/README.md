@@ -60,6 +60,8 @@ It is still a work in progress. Currently it can read pulse counts and move the 
 - SSP5A Pin 3 (Brown) → Motor Pin A2
 - SSP5A Pin 2 (Yellow) → Motor Pin A1
 
+Motor pin layout is not obvious on the board. Each stepper driver (X, Y, Z, A) has a column of four pins on RHS. From bottom up they are A2, A1, B1, B2.
+
 ### CNC Shield Connections:
 - **X-axis**: Controls Coil A (pins 2-3)
 - **Y-axis**: Controls Coil B (pins 1-4)
