@@ -534,8 +534,8 @@ class SSPDataAcquisitionWindow(Form):
         self.status_text.Refresh()  # Force immediate UI update
         Application.DoEvents()  # Process pending UI events
     
-    def _on_data_doubleclick(self, sender, event):
-        """Handle double-click on data listbox to edit notes."""
+    def _on_data_doubleclick_old_buggy(self, sender, event):
+        """Original buggy version of handle double-click on data listbox to edit notes."""
         if self.data_listbox.SelectedIndex < 0:
             return
         
@@ -613,9 +613,110 @@ class SSPDataAcquisitionWindow(Form):
                     else:
                         self.saved_data[i] = data_line
                     break
-    
-    # Menu event handlers
-    
+
+    def _on_data_doubleclick(self, sender, event):
+        """Handle double-click on data listbox to edit notes."""
+        if self.data_listbox.SelectedIndex < 0:
+            return
+        
+        # Get the selected index in the listbox
+        selected_index = self.data_listbox.SelectedIndex
+        
+        # The listbox displays data in reverse chronological order (newest first)
+        # self.data_array is also in reverse chronological order (newest first via insert(0, ...))
+        # self.saved_data and self.saved_data_tab are in chronological order (oldest first)
+        
+        # Calculate the corresponding index in the chronological arrays
+        # Formula: chronological_index = (total_items - 1) - selected_index
+        total_items = len(self.data_array)
+        if total_items == 0:
+            return
+        
+        chronological_index = (total_items - 1) - selected_index
+        
+        # Get the selected item text
+        selected_item = self.data_listbox.Items[selected_index]
+        selected_text = str(selected_item)
+        
+        # Extract base data line without any existing note
+        # Check if the selected text contains a note by looking in data_notes
+        data_line = selected_text
+        current_note = ""
+        
+        # Try to find if this selected text corresponds to a data_line with note
+        for key, note_value in self.data_notes.items():
+            if selected_text == key + " " + note_value:
+                # This is a data line with a note
+                data_line = key
+                current_note = note_value
+                break
+            elif selected_text.startswith(key) and selected_text[len(key):].strip() == note_value:
+                # Handle potential extra spaces
+                data_line = key
+                current_note = note_value
+                break
+        
+        # If no note found but selected_text might be in data_notes (as a key with empty note)
+        if current_note == "" and selected_text in self.data_notes:
+            # This shouldn't normally happen, but handle it
+            current_note = self.data_notes[selected_text]
+        
+        # Show input dialog for note
+        from Microsoft.VisualBasic import Interaction
+        new_note = Interaction.InputBox(
+            "Enter note/comment for this observation:",
+            "Edit Note",
+            current_note,
+            -1, -1
+        )
+        
+        if new_note is not None and new_note != current_note:  # User clicked OK and changed
+            # Store or update note
+            if new_note.strip():
+                self.data_notes[data_line] = new_note.strip()
+                # Update display
+                updated_line = data_line + " " + new_note.strip()
+                self.data_listbox.Items[selected_index] = updated_line
+            else:
+                # Remove note if empty
+                if data_line in self.data_notes:
+                    del self.data_notes[data_line]
+                self.data_listbox.Items[selected_index] = data_line
+            
+            # Update in data arrays using index-based approach
+            # Update data_array (reverse chronological order)
+            if selected_index < len(self.data_array):
+                if new_note.strip():
+                    self.data_array[selected_index] = data_line + " " + new_note.strip()
+                else:
+                    self.data_array[selected_index] = data_line
+            
+            # Update saved_data and saved_data_tab (chronological order)
+            if 0 <= chronological_index < len(self.saved_data):
+                if new_note.strip():
+                    self.saved_data[chronological_index] = data_line + " " + new_note.strip()
+                    # For tab data, append note as a new tab-separated column
+                    # First check if the tab line already has a note column
+                    tab_line = self.saved_data_tab[chronological_index]
+                    # Split by tabs to see if it already has a note
+                    parts = tab_line.split('\t')
+                    # The last part after the gain is the note if it exists
+                    if len(parts) > 8:  # Already has note column
+                        # Replace the note part
+                        parts[-1] = new_note.strip()
+                        self.saved_data_tab[chronological_index] = '\t'.join(parts)
+                    else:
+                        # Add note as new column
+                        self.saved_data_tab[chronological_index] = tab_line + "\t" + new_note.strip()
+                else:
+                    self.saved_data[chronological_index] = data_line
+                    # Remove note column from tab data
+                    tab_line = self.saved_data_tab[chronological_index]
+                    parts = tab_line.split('\t')
+                    if len(parts) > 8:  # Has note column
+                        # Keep only the first 8 columns (date, time, catalog, object, filter, counts, integ, gain)
+                        self.saved_data_tab[chronological_index] = '\t'.join(parts[:8])
+
     def _on_save_data(self, sender, event):
         """Handle Save Data menu item."""
         if len(self.saved_data) == 0:
@@ -1502,7 +1603,7 @@ class SSPDataAcquisitionWindow(Form):
             str: Formatted data line
         """
         # Pad/truncate object name to 12 characters
-        obj_padded = (object_name + " " * 12)[:12].trim()
+        obj_padded = (object_name + " " * 12)[:12].strip()
         
         # Format counts (pad to 4 readings with spaces)
         count_strs = []
@@ -1514,10 +1615,10 @@ class SSPDataAcquisitionWindow(Form):
         counts_str = "\t".join(count_strs)
         
         # Integration time (pad to 2 chars)
-        integ_padded = integ.replace(".00", "").trim()
+        integ_padded = integ.replace(".00", "").strip()
         
         # Gain (pad to 2 chars)
-        gain_padded = gain.trim()
+        gain_padded = gain.strip()
         
         # Build line
         line = catalog + "\t" + obj_padded + "\t" + filter_char + "\t" + ut_date + "\t" + ut_time + "\t" +  counts_str + "\t" + integ_padded + "\t" + gain_padded
