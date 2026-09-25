@@ -99,6 +99,7 @@ class SSPDataAcquisitionWindow(Form):
         # Data arrays
         self.data_array = []
         self.saved_data = []
+        self.saved_data_tab = []
         self.data_saved_count = 0  # Track how many entries have been saved to file
         self.data_notes = {}  # Dictionary to store notes: {data_line: note}
         self.data_notes = {}  # Dictionary to store notes: {data_line: note}
@@ -608,6 +609,7 @@ class SSPDataAcquisitionWindow(Form):
                 if self.saved_data[i].startswith(date_time_key):
                     if new_note.strip():
                         self.saved_data[i] = data_line + " " + new_note.strip()
+                        self.saved_data_tab[i] = self.saved_data_tab[i] + "\t" + new_note.strip()
                     else:
                         self.saved_data[i] = data_line
                     break
@@ -643,6 +645,8 @@ class SSPDataAcquisitionWindow(Form):
             try:
                 # Save data in SSPDataq .raw format
                 self._save_raw_file(sfd.FileName, header_info)
+                # Save data in .tab format
+                self._save_tab_file(sfd.FileName.replace('.raw','.tab'), header_info)
                 self.data_saved_count = len(self.saved_data)  # Update saved count
                 self.config.set('last_data_directory', Path.GetDirectoryName(sfd.FileName))
                 self.config.save()
@@ -793,6 +797,48 @@ class SSPDataAcquisitionWindow(Form):
             with open(filename, 'a') as f:
                 for i in range(self.data_saved_count, len(self.saved_data)):
                     f.write(" " + self.saved_data[i] + "\n")
+
+    def _save_tab_file(self, filename, header_info=None):
+        """Save data in SSPDataq tab file format suitable for import into spreadsheet applications and conforming better to the PEP analysis spreadsheet
+        
+        File format:
+        FILENAME=filename.RAW       RAW OUTPUT DATA FROM SSP DATA ACQUISITION PROGRAM
+        UT DATE= MM/DD/YYYY   TELESCOPE= [name]      OBSERVER= [name]
+        CONDITIONS= [description]
+        CAT OBJECT F MO-DY-YEAR UT COUNT1 COUNT2 COUNT3 COUNT4 INT SCLE COMMENTS
+        [data lines]
+        
+        Args:
+            filename: Full path to save file
+            header_info: dict with telescope, observer, conditions (None for append mode)
+        """
+        import System.IO
+        
+        if header_info is not None:
+            # New file - write header and all data
+            # Get current UT date for header
+            ut_now = DateTime.UtcNow
+            ut_date_header = ut_now.ToString("MM/dd/yyyy")
+            
+            # Extract just the filename for header
+            file_only = System.IO.Path.GetFileName(filename)
+            
+            with open(filename, 'w') as f:
+                # Write header - note leading space on all lines to match original
+                f.write(" FILENAME=" + file_only.upper() + "       RAW OUTPUT DATA FROM SSP DATA ACQUISITION PROGRAM\n")
+                f.write(" UT DATE= " + ut_date_header + "   TELESCOPE= " + header_info['telescope'].upper() + 
+                       "      OBSERVER= " + header_info['observer'].upper() + "\n")
+                f.write(" CONDITIONS= " + header_info['conditions'].upper() + "\n")
+                f.write("CAT\tOBJECT\tF\tMO-DY-YEAR\tUT\tCOUNT1\tCOUNT2\tCOUNT3\tCOUNT4\tINT\tSCLE\tCOMMENTS\n")
+                
+                # Write data lines (in original order, not display order)
+                for data_line in self.saved_data_tab:
+                    f.write(data_line + "\n")
+        else:
+            # Append mode - only add new data since last save
+            with open(filename, 'a') as f:
+                for i in range(self.data_saved_count, len(self.saved_data_tab)):
+                    f.write(self.saved_data_tab[i] + "\n")
     
     def _on_clear_data(self, sender, event):
         """Handle Clear Data menu item."""
@@ -804,6 +850,7 @@ class SSPDataAcquisitionWindow(Form):
         if result == DialogResult.Yes:
             self.data_array = []
             self.saved_data = []
+            self.saved_data_tab = []
             self.data_saved_count = 0  # Reset saved count
             self.data_notes = {}  # Clear notes dictionary
             self.data_listbox.Items.Clear()
@@ -1340,9 +1387,15 @@ class SSPDataAcquisitionWindow(Form):
             ut_date_str, ut_time_str, catalog_code, object_val,
             filter_val, counts, f"{float(integ_text) * binning:0.2f}", str(gain_val)
         )
+        # Tab format data line
+        data_line_tab = self._format_data_line_tab(
+            ut_date_str, ut_time_str, catalog_code, object_val,
+            filter_val, counts, f"{float(integ_text) * binning:0.2f}", str(gain_val)
+        )
         
         # Add to data arrays
         self.saved_data.append(data_line)
+        self.saved_data_tab.append(data_line_tab)
         self.data_array.insert(0, data_line)  # Insert at beginning for reverse display
         
         # Add to listbox (display in reverse chronological order)
@@ -1426,6 +1479,48 @@ class SSPDataAcquisitionWindow(Form):
         
         # Build line
         line = ut_date + " " + ut_time + " " + catalog + "    " + obj_padded + "   " + filter_char + "  " + counts_str + "  " + integ_padded + " " + gain_padded
+        
+        return line
+
+    def _format_data_line_tab(self, ut_date, ut_time, catalog, object_name, filter_char, counts, integ, gain):
+        """Format data line for TAB file output compatible with Excel.
+        
+        Follows new TAB SSPDataq format from:
+        CAT OBJECT F MO-DY-YEAR UT COUNT1 COUNT2 COUNT3 COUNT4 INT SCLE COMMENTS
+        
+        Args:
+            ut_date: UT date string (MM-DD-YYYY)
+            ut_time: UT time string (HH:MM:SS)
+            catalog: Single character catalog code
+            object_name: Object name (truncated to 12 chars)
+            filter_char: Filter character
+            counts: List of count strings (up to 4)
+            integ: Integration time string
+            gain: Gain string
+            
+        Returns:
+            str: Formatted data line
+        """
+        # Pad/truncate object name to 12 characters
+        obj_padded = (object_name + " " * 12)[:12].trim()
+        
+        # Format counts (pad to 4 readings with spaces)
+        count_strs = []
+        for i in range(4):
+            if i < len(counts):
+                count_strs.append(counts[i])
+            else:
+                count_strs.append("")
+        counts_str = "\t".join(count_strs)
+        
+        # Integration time (pad to 2 chars)
+        integ_padded = integ.replace(".00", "").trim()
+        
+        # Gain (pad to 2 chars)
+        gain_padded = gain.trim()
+        
+        # Build line
+        line = catalog + "\t" + obj_padded + "\t" + filter_char + "\t" + ut_date + "\t" + ut_time + "\t" +  counts_str + "\t" + integ_padded + "\t" + gain_padded
         
         return line
 
