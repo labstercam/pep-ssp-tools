@@ -316,6 +316,8 @@ class SSPDataAcquisitionWindow(Form):
         self.interval_combo.Items.Add("2")    # slow mode only
         self.interval_combo.Items.Add("3")    # slow mode only
         self.interval_combo.Items.Add("4")    # slow mode only
+        self.interval_combo.Items.Add("6")    # slow mode only
+        self.interval_combo.Items.Add("8")    # slow mode only
         self.interval_combo.Items.Add("100")  # fast mode only
         self.interval_combo.Items.Add("1000") # fast mode only
         self.interval_combo.Items.Add("2000") # fast and very fast modes
@@ -1289,6 +1291,11 @@ class SSPDataAcquisitionWindow(Form):
         
         # Collect counts for specified interval
         counts = []
+        # Indicate if values are binned by summing pairs for special 6 or 8 intervals
+        binning = 1
+        if interval_val in [6, 8]:
+            binning = 2  # Sum pairs of counts for 6 or 8 intervals
+
         for i in range(interval_val):
             success, count_str, error_msg = self.comm.get_slow_count(integ_ms)
             
@@ -1306,7 +1313,13 @@ class SSPDataAcquisitionWindow(Form):
                 else:
                     self._update_status("Failed to get count after retry")
                     counts.append("00000")  # Insert zero on failure
-        
+        # Special treatement when  of 6 or 8 is chosen.
+        # Sum pairs of counts to reduce to 3 or 4 readings, respectively so that it conforms to the standard output
+        # This enables, say, 5s integrations for bright stars instead of 10s to avoid saturation
+        # but keeps the output to 3 or 4 values
+        if binning == 2:
+            counts = [str(int(counts[i]) + int(counts[i+1])) for i in range(0, len(counts), 2)]
+
         # Re-enable button
         self.start_button.Text = "START"
         self.start_button.Enabled = True
@@ -1314,7 +1327,8 @@ class SSPDataAcquisitionWindow(Form):
         # Calculate mid-point timestamp (matches original SSPDataq [UTtimeCorrected])
         # Original: MidCount = int((IntervalRecord * (Integ/1000))/2)
         # Then adds MidCount seconds to recorded UT time
-        total_integration_sec = len(counts) * integ_val
+        # Correct integration total time for 6 or 8 readings (sum of pairs) by multiplying by the binning
+        total_integration_sec = len(counts) * integ_val * binning
         mid_count_sec = int(total_integration_sec / 2.0)
         ut_midpoint = ut_start.AddSeconds(mid_count_sec)
         ut_date_str = ut_midpoint.ToString("MM-dd-yyyy")
@@ -1324,7 +1338,7 @@ class SSPDataAcquisitionWindow(Form):
         # Format: "MM-DD-YYYY HH:MM:SS C OBJECTNAME F XXXXX XXXXX XXXXX XXXXX II GG NOTES"
         data_line = self._format_data_line(
             ut_date_str, ut_time_str, catalog_code, object_val,
-            filter_val, counts, integ_text, str(gain_val)
+            filter_val, counts, f"{float(integ_text) * binning:0.2f}", str(gain_val)
         )
         
         # Add to data arrays
@@ -1334,7 +1348,7 @@ class SSPDataAcquisitionWindow(Form):
         # Add to listbox (display in reverse chronological order)
         self.data_listbox.Items.Insert(0, data_line)
         
-        self._update_status("Data collection complete - " + str(len(counts)) + " readings")
+        self._update_status("Data collection complete - " + str(len(counts)) + " readings." + (" Binned: " + str(binning == 2) if binning == 2 else ""))
     
     def _do_trial_mode(self, filter_val, gain_val, integ_ms):
         """Execute trial mode (single test reading).
