@@ -56,8 +56,12 @@ class SSPDataAcquisitionWindow(Form):
         Form.__init__(self)
         
         # Initialize SSP communication and configuration
-        self.comm = ssp_comm.SSPCommunicator()
         self.config = ssp_config.SSPConfig()
+        self.comm = ssp_comm.SSPCommunicator(
+            boot_delay=self.config.get('boot_delay', 5.0),
+            device_type=self.config.get('device_type', 'auto'),
+            config=self.config
+        )
         
         # Initialize night mode
         self.night_mode = night_mode.NightMode()
@@ -77,11 +81,10 @@ class SSPDataAcquisitionWindow(Form):
         self.CoordinateParser = coordinate_parser
         self.sharpcap_available = sharpcap is not None
         
-        print("DEBUG: sharpcap_available = %s" % self.sharpcap_available)
         if self.sharpcap_available:
-            print("DEBUG: Running in SharpCap mode - GOTO button will be created")
+            pass
         else:
-            print("DEBUG: Running in standalone mode - GOTO button will NOT be created")
+            pass
         
         # Dictionary to map object combo display names to (actual_name, catalog_type)
         # catalog_type: 'V' for variable, 'C' for comparison, 'K' for check
@@ -183,6 +186,12 @@ class SSPDataAcquisitionWindow(Form):
         com_port_item = ToolStripMenuItem("Select SSP COM Port")
         com_port_item.Click += self._on_select_com_port
         setup_menu.DropDownItems.Add(com_port_item)
+        
+        setup_menu.DropDownItems.Add(ToolStripSeparator())
+        
+        device_type_item = ToolStripMenuItem("SSP Device Type...")
+        device_type_item.Click += self._on_device_type
+        setup_menu.DropDownItems.Add(device_type_item)
         
         setup_menu.DropDownItems.Add(ToolStripSeparator())
         
@@ -489,7 +498,6 @@ class SSPDataAcquisitionWindow(Form):
             # Position next to START button at same Y coordinate
             start_y = self.start_button.Location.Y
             start_x = self.start_button.Location.X + self.start_button.Size.Width + 10  # 10px gap
-            print("DEBUG: Creating GOTO button at position (%d, %d)" % (start_x, start_y))
             self.goto_button = Button()
             self.goto_button.Text = "GOTO Selected Star"
             self.goto_button.Location = Point(start_x, start_y)
@@ -498,10 +506,8 @@ class SSPDataAcquisitionWindow(Form):
             self.goto_button.Click += self._on_goto_target
             self.goto_button.BringToFront()  # Ensure it's on top
             self.Controls.Add(self.goto_button)
-            print("DEBUG: GOTO button created and added to form")
-            print("DEBUG: Button visible=%s, enabled=%s" % (self.goto_button.Visible, self.goto_button.Enabled))
         else:
-            print("DEBUG: Skipping GOTO button creation (not in SharpCap)")
+            pass
     
     def _update_time_display(self, sender, event):
         """Update time display."""
@@ -1126,6 +1132,99 @@ class SSPDataAcquisitionWindow(Form):
                           "You will need to manually change filters when prompted.",
                           "Manual Filter Mode", MessageBoxButtons.OK, MessageBoxIcon.Information)
     
+    def _on_device_type(self, sender, event):
+        """Handle SSP Device Type menu item."""
+        try:
+            # Create a simple dialog for device type selection
+            dialog = Form()
+            dialog.Text = "SSP Device Type Configuration"
+            dialog.Width = 400
+            dialog.Height = 250
+            dialog.StartPosition = FormStartPosition.CenterParent
+            
+            # Info label
+            info_label = Label()
+            info_label.Text = "Select SSP device type for communication timing:"
+            info_label.Location = Point(20, 20)
+            info_label.Size = Size(350, 40)
+            info_label.Font = Font(info_label.Font.FontFamily, 9)
+            dialog.Controls.Add(info_label)
+            
+            # Auto detection radio
+            auto_radio = RadioButton()
+            auto_radio.Text = "Auto (recommended) - Try SSP3 timing first, then SSP5A"
+            auto_radio.Location = Point(40, 70)
+            auto_radio.Size = Size(330, 30)
+            auto_radio.Font = Font(auto_radio.Font.FontFamily, 9)
+            dialog.Controls.Add(auto_radio)
+            
+            # SSP3 radio
+            ssp3_radio = RadioButton()
+            ssp3_radio.Text = "SSP3 - Original SSPDataq3 hardware (built-in serial)"
+            ssp3_radio.Location = Point(40, 100)
+            ssp3_radio.Size = Size(330, 30)
+            ssp3_radio.Font = Font(ssp3_radio.Font.FontFamily, 9)
+            dialog.Controls.Add(ssp3_radio)
+            
+            # SSP5A radio
+            ssp5a_radio = RadioButton()
+            ssp5a_radio.Text = "SSP5A - Arduino-based hardware (requires boot delay)"
+            ssp5a_radio.Location = Point(40, 130)
+            ssp5a_radio.Size = Size(330, 30)
+            ssp5a_radio.Font = Font(ssp5a_radio.Font.FontFamily, 9)
+            dialog.Controls.Add(ssp5a_radio)
+            
+            # Set current selection
+            current_type = self.config.get('device_type', 'auto')
+            if current_type == 'ssp3':
+                ssp3_radio.Checked = True
+            elif current_type == 'ssp5a':
+                ssp5a_radio.Checked = True
+            else:
+                auto_radio.Checked = True
+            
+            # Current detection info
+            detected = self.config.get('detected_device_type', 'unknown')
+            detect_label = Label()
+            detect_label.Text = f"Last detected: {detected.upper() if detected != 'unknown' else 'Not yet detected'}"
+            detect_label.Location = Point(20, 170)
+            detect_label.Size = Size(350, 20)
+            detect_label.Font = Font(detect_label.Font.FontFamily, 8, FontStyle.Italic)
+            dialog.Controls.Add(detect_label)
+            
+            # OK button
+            ok_btn = Button()
+            ok_btn.Text = "OK"
+            ok_btn.Location = Point(150, 200)
+            ok_btn.Size = Size(90, 30)
+            ok_btn.Click += lambda s, e: dialog.Close()
+            dialog.Controls.Add(ok_btn)
+            
+            # Show dialog
+            dialog.ShowDialog()
+            
+            # Save selection
+            if auto_radio.Checked:
+                new_type = 'auto'
+            elif ssp3_radio.Checked:
+                new_type = 'ssp3'
+            else:
+                new_type = 'ssp5a'
+            
+            if new_type != current_type:
+                self.config.config['device_type'] = new_type
+                self.config.save()
+                
+                # Update communicator if already connected
+                if hasattr(self, 'comm'):
+                    self.comm.device_type = new_type
+                
+                self._update_status(f"Device type set to: {new_type}")
+            
+        except Exception as e:
+            print(f"[ERROR] Device type dialog error: {str(e)}")
+            MessageBox.Show(f"Error configuring device type: {str(e)}", "Error",
+                          MessageBoxButtons.OK, MessageBoxIcon.Error)
     def _on_observer_location(self, sender, event):
         """Handle Observer Location menu item."""
         # Get current location from config
@@ -1741,13 +1840,11 @@ class SSPDataAcquisitionWindow(Form):
             
             # Enable GOTO button if in SharpCap mode
             if self.sharpcap_available and hasattr(self, 'goto_button'):
-                print("DEBUG: Enabling GOTO button for target: %s" % target.variable.name)
                 self.goto_button.Enabled = True
-                print("DEBUG: GOTO button enabled=%s, visible=%s" % (self.goto_button.Enabled, self.goto_button.Visible))
             elif self.sharpcap_available:
-                print("DEBUG: WARNING - sharpcap_available=True but goto_button attribute not found!")
+                pass
             else:
-                print("DEBUG: Not enabling GOTO button (not in SharpCap mode)")
+                pass
             
             # Update the current target label
             self.current_target_label.Text = "Current Target: Var=%s | Comp=%s | Check=%s" % (
@@ -2834,6 +2931,7 @@ class ExtinctionStarSelectionDialog(Form):
         self.DialogResult = DialogResult.Cancel
         self.Close()
     
+
     def _on_star_double_click(self, sender, event):
         """Handle double-click on star row."""
         if self.star_grid.SelectedRows.Count > 0:

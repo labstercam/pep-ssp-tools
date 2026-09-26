@@ -50,7 +50,7 @@ def test_connection(com_port):
     print("")
     
     # Create communicator
-    comm = ssp_comm.SSPCommunicator()
+    comm = ssp_comm.SSPCommunicator(device_type='auto')
     
     # Test connection
     print("Connecting to SSP photometer...")
@@ -133,7 +133,7 @@ def test_continuous_monitoring(com_port, duration_seconds=60):
     print("Integration time: 1 second")
     print("")
     
-    comm = ssp_comm.SSPCommunicator()
+    comm = ssp_comm.SSPCommunicator(device_type='auto')
     
     # Connect
     success, message = comm.connect(com_port)

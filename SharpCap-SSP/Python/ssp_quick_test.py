@@ -33,7 +33,7 @@ class SSPQuickTestForm(Form):
     
     def __init__(self):
         """Initialize test form."""
-        self.comm = ssp_comm.SSPCommunicator()
+        self.comm = ssp_comm.SSPCommunicator(device_type='auto')
         
         # Setup form
         self.Text = "SSP Quick Test"

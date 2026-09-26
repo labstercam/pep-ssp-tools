@@ -43,7 +43,10 @@ class SSPConfig:
         'last_integ_index': 0,
         'last_interval_index': 0,
         'last_mode_index': 1,  # slow mode
-        'last_data_directory': ''
+        'last_data_directory': '',
+        'boot_delay': 5.0,  # Seconds to wait after opening COM port before sending SSSSSS
+        'device_type': 'auto',  # 'auto', 'ssp3', 'ssp5a' - configurable device type
+        'detected_device_type': 'unknown'  # 'unknown', 'ssp3', 'ssp5a' - auto-detected
     }
     
     def __init__(self, config_dir=None):
@@ -81,6 +84,15 @@ class SSPConfig:
                     loaded = json.load(f)
                     # Merge with defaults to handle new settings
                     self.config.update(loaded)
+                    
+                    # SPECIAL HANDLING FOR boot_delay:
+                    # Force new default of 5.0 for all users upgrading from earlier versions
+                    # Users can still override this in the config file if they want
+                    if loaded.get('boot_delay', 5.0) == 2.5:
+                        # This is the old default value, force update to new default
+                        self.config['boot_delay'] = 5.0
+                        print("[SSP] Updated boot_delay from old default 2.5 to new default 5.0")
+                    
                     # Ensure filter_bars has proper structure
                     self._validate_filter_bars()
                 print("Configuration loaded from: " + self.json_path)

@@ -47,11 +47,11 @@ Verify serial communication and basic command processing.
 
 ### Steps
 ```
-1. Send: "SSSSSS"
+1. Send: "SSSSSS" start serial
    Expected: "!" (acknowledgment)
    Pass Criteria: Immediate response (<10ms)
 
-2. Send: "EEEEEE"
+2. Send: "SEEEEE" end serial
    Expected: "!" (acknowledgment)
    Pass Criteria: Immediate response
 
