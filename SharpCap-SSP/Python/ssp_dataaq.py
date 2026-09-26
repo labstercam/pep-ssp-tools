@@ -102,8 +102,6 @@ class SSPDataAcquisitionWindow(Form):
         self.saved_data_tab = []
         self.data_saved_count = 0  # Track how many entries have been saved to file
         self.data_notes = {}  # Dictionary to store notes: {data_line: note}
-        self.data_notes = {}  # Dictionary to store notes: {data_line: note}
-        self.data_notes = {}  # Dictionary to store notes: {data_line: note}
         
         # Setup window
         self.Text = "SSP Data Acquisition Program Version 3"
