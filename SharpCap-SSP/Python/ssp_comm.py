@@ -31,21 +31,111 @@ import time
 class SSPCommunicator:
     """Manages serial communication with SSP photometer."""
     
-    def __init__(self):
-        """Initialize communicator."""
+    def __init__(self, boot_delay=5.0, device_type='auto', config=None):
+        """Initialize communicator.
+        
+        Args:
+            boot_delay: Seconds to wait after opening COM port before sending 
+                       SSSSSS command. Arduino Uno bootloader takes ~2 seconds
+                       to complete. Default 5.0 seconds provides extra margin.
+            device_type: 'auto', 'ssp3', or 'ssp5a' - configurable device type
+            config: SSPConfig instance for accessing configuration
+        """
         self.port = None
         self.is_connected = False
         self.port_name = ""
         self.buffer_size = 32768
+        self.boot_delay = boot_delay  # Wait for Arduino bootloader
+        self.device_type = device_type  # 'auto', 'ssp3', 'ssp5a'
+        self.detected_device_type = 'unknown'  # 'unknown', 'ssp3', 'ssp5a'
+        self.config = config  # SSPConfig instance
+        
+        print(f"[SSP] Communicator initialized with boot delay: {self.boot_delay} seconds")
+        print(f"[SSP] Device type configured as: {self.device_type}")
+    
+    def _try_connect_with_params(self, com_port_number, boot_delay=0.5, wait_iterations=100, description="SSP3 timing"):
+        """Internal helper to try connection with specific parameters.
+        
+        Args:
+            com_port_number: COM port number
+            boot_delay: Seconds to wait after opening COM port
+            wait_iterations: Number of 50ms iterations to wait for response
+            description: Description of this connection attempt for logging
+            
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            print(f"[SSP] Trying connection with {description}: boot_delay={boot_delay}s, wait={wait_iterations*0.05}s")
+            
+            self.port_name = "COM" + str(com_port_number)
+            
+            # Open serial port with SSP parameters
+            self.port = SerialPort(self.port_name, 19200, getattr(Parity, 'None'), 8, StopBits.One)
+            self.port.ReadBufferSize = self.buffer_size
+            self.port.WriteBufferSize = self.buffer_size
+            self.port.ReadTimeout = 5000  # 5 second timeout
+            self.port.WriteTimeout = 1000  # 1 second timeout
+            self.port.Open()
+            
+            # Wait for bootloader if specified
+            if boot_delay > 0:
+                print(f"[SSP] Waiting {boot_delay} seconds {description}...")
+                time.sleep(boot_delay)
+            
+            # Clear any leftover data in serial buffer
+            print(f"[SSP] Clearing serial buffer...")
+            self._clear_buffer()
+            
+            # Send initialization command
+            print(f"[SSP] Sending initialization command: SSSSSS")
+            self._write("SSSSSS")
+            
+            # Wait for acknowledgment (original SSPDataq: 100 iterations × 50ms = 5 seconds)
+            data_read = ""
+            for i in range(wait_iterations):
+                time.sleep(0.05)  # 50ms pause
+                if self.port.BytesToRead > 0:
+                    chunk = self._read_available()
+                    data_read += chunk
+                
+                # Check if we have enough data
+                if len(data_read) > 0 and ("!" in data_read or chr(10) in data_read):
+                    break
+            
+            # Debug what we received
+            if data_read:
+                pass
+            
+            # Check for valid response
+            if len(data_read) > 0:
+                if "!" in data_read:
+                    self.is_connected = True
+                    return (True, f"Connected to {self.port_name} with {description}")
+                elif chr(10) in data_read:
+                    self.is_connected = True
+                    return (True, f"Connected to {self.port_name} with {description}")
+                else:
+                    pass
+            
+            # Connection failed
+            if self.port and self.port.IsOpen:
+                self.port.Close()
+            self.port = None
+            return (False, f"No response with {description}")
+            
+        except Exception as e:
+            if self.port and self.port.IsOpen:
+                self.port.Close()
+            self.port = None
+            return (False, f"Connection error with {description}: {str(e)}")
     
     def connect(self, com_port_number):
-        """Connect to SSP photometer.
+        """Connect to SSP photometer with progressive fallback.
         
-        Implements the connection sequence from SSPDataq:
-        1. Open COM port (19200,N,8,1)
-        2. Send "SSSSSS" command
-        3. Wait for acknowledgment (up to 5 seconds)
-        4. Check for valid response (CR or !)
+        Implements progressive fallback for SSP3/SSP5A compatibility:
+        1. Try SSP3 timing first (minimal boot delay, original SSPDataq timing)
+        2. If fails, try SSP5A timing (5s boot delay, shorter wait)
         
         Args:
             com_port_number: COM port number (1-19)
@@ -62,46 +152,82 @@ class SSPCommunicator:
         if com_port_number == 0:
             return (False, "Please select a COM port in Setup menu")
         
-        try:
-            self.port_name = "COM" + str(com_port_number)
+        # Reset detected device type
+        self.detected_device_type = 'unknown'
+        
+        # Handle manual device type selection
+        if self.device_type == 'ssp3':
+            print(f"[SSP] Using manual SSP3 timing (no progressive fallback)")
+            # Try SSP3 timing only
+            success, message = self._try_connect_with_params(
+                com_port_number, 
+                boot_delay=0.5,  # Minimal delay
+                wait_iterations=100,  # Original SSPDataq: 5 seconds total
+                description="SSP3 timing (manual)"
+            )
+            if success:
+                self.detected_device_type = 'ssp3'
+                if self.config:
+                    self.config.config['detected_device_type'] = 'ssp3'
+                    self.config.save()
+            return success, message
             
-            # Open serial port with SSP parameters
-            # Note: Use getattr() to access Parity.None since 'None' is a Python keyword
-            self.port = SerialPort(self.port_name, 19200, getattr(Parity, 'None'), 8, StopBits.One)
-            self.port.ReadBufferSize = self.buffer_size
-            self.port.WriteBufferSize = self.buffer_size
-            self.port.ReadTimeout = 5000  # 5 second timeout
-            self.port.WriteTimeout = 1000  # 1 second timeout
-            self.port.Open()
+        elif self.device_type == 'ssp5a':
+            print(f"[SSP] Using manual SSP5A timing (no progressive fallback)")
+            # Try SSP5A timing only
+            success, message = self._try_connect_with_params(
+                com_port_number, 
+                boot_delay=5.0,  # Full Arduino boot delay
+                wait_iterations=40,  # 2 seconds total
+                description="SSP5A timing (manual)"
+            )
+            if success:
+                self.detected_device_type = 'ssp5a'
+                if self.config:
+                    self.config.config['detected_device_type'] = 'ssp5a'
+                    self.config.save()
+            return success, message
+        
+        else:  # 'auto' mode - progressive fallback
+            print(f"[SSP] Using auto detection with progressive fallback")
             
-            # Send initialization command to put SSP into serial mode
-            self._write("SSSSSS")
+            # First attempt: SSP3 timing (minimal delay, original SSPDataq timing)
+            print(f"[SSP] First attempt: Trying SSP3 timing...")
+            success, message = self._try_connect_with_params(
+                com_port_number, 
+                boot_delay=0.5,  # Minimal delay for SSP3
+                wait_iterations=100,  # Original SSPDataq: 100 iterations × 50ms = 5 seconds
+                description="SSP3 timing (first attempt)"
+            )
             
-            # Wait for acknowledgment (up to 5 seconds, 100 iterations × 50ms)
-            data_read = ""
-            for i in range(100):
-                time.sleep(0.05)  # 50ms pause
-                if self.port.BytesToRead > 0:
-                    data_read = self._read_available()
-                    break
+            if success:
+                print(f"[SSP] SUCCESS: Device detected as SSP3 (fast response)")
+                self.detected_device_type = 'ssp3'
+                if self.config:
+                    self.config.config['detected_device_type'] = 'ssp3'
+                    self.config.save()
+                return success, message
             
-            # Check for valid response (CR=10 or !=33 ASCII)
-            if len(data_read) > 0:
-                first_char = ord(data_read[0])
-                if first_char == 10 or first_char == 33:  # CR or !
-                    self.is_connected = True
-                    return (True, "Connected to " + self.port_name)
+            # Second attempt: SSP5A timing (full boot delay)
+            print(f"[SSP] First attempt failed, trying SSP5A timing...")
+            success, message = self._try_connect_with_params(
+                com_port_number, 
+                boot_delay=5.0,  # Full Arduino boot delay
+                wait_iterations=40,  # 40 iterations × 50ms = 2 seconds
+                description="SSP5A timing (second attempt)"
+            )
             
-            # Connection failed - no valid response
-            self.port.Close()
-            self.port = None
-            return (False, "Not connected - no response from SSP. Is unit on?")
+            if success:
+                print(f"[SSP] SUCCESS: Device detected as SSP5A (requires boot delay)")
+                self.detected_device_type = 'ssp5a'
+                if self.config:
+                    self.config.config['detected_device_type'] = 'ssp5a'
+                    self.config.save()
+                return success, message
             
-        except Exception as e:
-            if self.port and self.port.IsOpen:
-                self.port.Close()
-            self.port = None
-            return (False, "Connection failed: " + str(e))
+            # Both attempts failed
+            print(f"[SSP] ERROR: Both connection attempts failed")
+            return (False, "Not connected - no response from SSP with either timing. Check power and connections.")
     
     def disconnect(self):
         """Disconnect from SSP photometer.
@@ -160,8 +286,27 @@ class SSPCommunicator:
             # Clear buffer
             self._clear_buffer()
             
-            # Send count command
-            self._write("SCnnnn")
+            # Send count command - format: SCnnnn where nnnn is 4-digit integration time
+            command = "SC{:04d}".format(integration_ms)
+            self._write(command)
+            
+            # Determine which timing mode to use
+            # Manual device_type overrides auto-detected device_type
+            if self.device_type != 'auto':
+                # Manual mode: use specified type
+                use_ssp5a_timing = (self.device_type == 'ssp5a')
+            else:
+                # Auto mode: use detected type, default to SSP5A for safety
+                if self.detected_device_type != 'unknown':
+                    use_ssp5a_timing = (self.detected_device_type == 'ssp5a')
+                else:
+                    # Not yet detected, be conservative and use SSP5A timing
+                    use_ssp5a_timing = True
+            
+            # Only give Arduino a moment to process if using SSP5A timing
+            # Original SSPDataq3 code doesn't have this delay for SSP3
+            if use_ssp5a_timing:
+                time.sleep(0.02)  # 20ms - enough for Arduino to parse command
             
             # Wait for integration time - match original SSPDataq timing exactly
             if integration_ms == 1000:
@@ -176,21 +321,30 @@ class SSPCommunicator:
             
             time.sleep(wait_time)
             
-            # Read response
-            response = self._read_available()
+            # Read response with device-specific timeout
+            # Use the same timing mode determined earlier
+            # SSP3: Original SSPDataq3 timing (shorter timeout)
+            # SSP5A: Longer timeout for Arduino communication
+            if use_ssp5a_timing:
+                timeout_seconds = 2.0  # Current SSP5A timeout
+            else:
+                timeout_seconds = 1.0  # Original SSPDataq3 timeout for SSP3
+            
+            response = self._read_with_timeout(timeout_seconds=timeout_seconds, expected_end='\r\n')
             
             # Find "=" and extract 5 characters after it
             equals_pos = response.find("=")
+            
             if equals_pos >= 0 and len(response) >= equals_pos + 6:
                 count_str = response[equals_pos + 1:equals_pos + 6]
                 
                 # Verify first character is not null (error check)
-                if ord(count_str[0]) != 0:
+                if count_str and ord(count_str[0]) != 0:
                     return (True, count_str, "")
                 else:
                     return (False, None, "Communication error - null character received")
             else:
-                return (False, None, "Invalid response format: " + response)
+                return (False, None, "Invalid response format: " + repr(response))
                 
         except Exception as e:
             return (False, None, "Error getting count: " + str(e))
@@ -461,6 +615,50 @@ class SSPCommunicator:
         """
         if self.port and self.port.IsOpen:
             self.port.Write(data)
+    
+    def _read_with_timeout(self, timeout_seconds=2.0, expected_end='\r\n'):
+        """Read from serial port with timeout.
+        
+        Args:
+            timeout_seconds: Maximum time to wait for data
+            expected_end: String that indicates complete response (default \r\n)
+            
+        Returns:
+            str: Data read from port, or empty string if timeout
+        """
+        if not self.port or not self.port.IsOpen:
+            return ""
+        
+        import time
+        
+        start_time = time.time()
+        data = ""
+        last_data_time = time.time()
+        
+        while time.time() - start_time < timeout_seconds:
+            # Check if any data is available
+            if self.port.BytesToRead > 0:
+                chunk = self.port.ReadExisting()
+                if chunk:
+                    data += chunk
+                    last_data_time = time.time()
+                    
+                    # Check if we have complete response (ends with expected_end)
+                    if data.endswith(expected_end):
+                        return data
+                
+                # Small sleep to avoid tight loop
+                time.sleep(0.001)  # 1ms
+            else:
+                # If we got some data but nothing new for 100ms, return what we have
+                if data and (time.time() - last_data_time) > 0.1:
+                    return data
+                    
+                # No data yet, sleep a bit
+                time.sleep(0.01)  # 10ms
+        
+        # Timeout reached
+        return data
     
     def _read_available(self):
         """Read all available data from serial port.
