@@ -92,28 +92,23 @@ class SSPCommunicator:
             self._write("SSSSSS")
             
             # Wait for acknowledgment (original SSPDataq: 100 iterations × 50ms = 5 seconds)
-            data_parts = []  # Use list for accumulation
+            data_read = ""
             for i in range(wait_iterations):
                 time.sleep(0.05)  # 50ms pause
                 if self.port.BytesToRead > 0:
                     chunk = self._read_available()
-                    if chunk:
-                        data_parts.append(chunk)
+                    data_read += chunk
                 
                 # Check if we have enough data
-                if data_parts:
-                    data_joined = ''.join(data_parts)  # Join to check
-                    if "!" in data_joined or chr(10) in data_joined:
-                        # Store the joined data for later use
-                        data_read = data_joined
-                        break
+                if len(data_read) > 0 and ("!" in data_read or chr(10) in data_read):
+                    break
             
-            # Join all parts if we haven't already
-            if data_parts and 'data_read' not in locals():
-                data_read = ''.join(data_parts)
+            # Debug what we received
+            if data_read:
+                pass
             
             # Check for valid response
-            if data_parts:  # Check if we have any data
+            if len(data_read) > 0:
                 if "!" in data_read:
                     self.is_connected = True
                     return (True, f"Connected to {self.port_name} with {description}")
@@ -622,12 +617,7 @@ class SSPCommunicator:
             self.port.Write(data)
     
     def _read_with_timeout(self, timeout_seconds=2.0, expected_end='\r\n'):
-        """Read from serial port with timeout - OPTIMIZED VERSION.
-        
-        Optimized for IronPython 2.7 to reduce memory allocations:
-        - Uses list accumulation instead of string concatenation
-        - Reduces temporary string object creation
-        - Improves performance during long data acquisition sessions
+        """Read from serial port with timeout.
         
         Args:
             timeout_seconds: Maximum time to wait for data
@@ -642,7 +632,7 @@ class SSPCommunicator:
         import time
         
         start_time = time.time()
-        data_parts = []  # Use list instead of string for accumulation
+        data = ""
         last_data_time = time.time()
         
         while time.time() - start_time < timeout_seconds:
@@ -650,33 +640,25 @@ class SSPCommunicator:
             if self.port.BytesToRead > 0:
                 chunk = self.port.ReadExisting()
                 if chunk:
-                    data_parts.append(chunk)  # Append to list (O(1))
+                    data += chunk
                     last_data_time = time.time()
                     
-                    # Optimized: Check chunk directly first (common case)
-                    if chunk.endswith(expected_end):
-                        # Join all parts and return
-                        return ''.join(data_parts)
-                    
-                    # Periodically check if accumulated data ends with expected_end
-                    # Only join when we have enough parts to avoid frequent joining
-                    if len(data_parts) >= 5:  # Check every 5 chunks
-                        data = ''.join(data_parts)
-                        if data.endswith(expected_end):
-                            return data
+                    # Check if we have complete response (ends with expected_end)
+                    if data.endswith(expected_end):
+                        return data
                 
                 # Small sleep to avoid tight loop
                 time.sleep(0.001)  # 1ms
             else:
                 # If we got some data but nothing new for 100ms, return what we have
-                if data_parts and (time.time() - last_data_time) > 0.1:
-                    return ''.join(data_parts)
+                if data and (time.time() - last_data_time) > 0.1:
+                    return data
                     
                 # No data yet, sleep a bit
                 time.sleep(0.01)  # 10ms
         
-        # Timeout reached - join any collected parts
-        return ''.join(data_parts) if data_parts else ""
+        # Timeout reached
+        return data
     
     def _read_available(self):
         """Read all available data from serial port.

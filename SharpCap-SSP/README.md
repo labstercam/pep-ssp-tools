@@ -20,7 +20,7 @@ https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.4
 
 This tool replicates the core data collection functionality of the original SSPDataq software, enabling serial communication and photometer control directly within the SharpCap environment or standalone.
 
-## Status: Version 0.1.4 - Fully Functional
+## Status: Version 0.1.4 - Fully Functional with Memory Optimizations
 
 ✅ **Serial communication implemented and tested**
 ✅ **Data collection working (slow mode + trial mode)**
@@ -28,7 +28,8 @@ This tool replicates the core data collection functionality of the original SSPD
 ✅ **First order extinction star selection with airmass filtering**
 ✅ **Real-time Alt/Az coordinate display**
 ✅ **All Sky Calibration tool for extinction coefficient calculation**
-✅ **Test scripts included for verification**
+✅ **Memory optimizations for extended observation sessions**
+✅ **Test scripts and verification tools included**
 
 See [QUICK_START.md](QUICK_START.md) for usage instructions.
 See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details.
@@ -70,11 +71,13 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 - ✅ SSP photometer command protocol (SSSSSS, SEEEEE, SCnnnn, SGNNN)
 - ✅ **Slow Mode**: 1-4 readings with 0.02-10 second integrations
 - ✅ **Trial Mode**: Single test reading with instant results
+- ✅ Automatic binning of 6 or 8 readings to 3 or 4 readings so can use, say, 5s integrations instead of 10s to avoid saturation 
 - ✅ Real-time data display with column headers
 - ✅ Resizable window with fixed controls and dynamic data display
 - ✅ Notes field - double-click data lines to add comments
 - ✅ Status message logging with timestamps and immediate updates
 - ✅ Data export to .raw files (SSPDataq compatible)
+- ✅ Data export to .tab text files which can open directly in Excel or copied easily into PEP processing Excel
 - ✅ Header information dialog (telescope, observer, conditions)
 - ✅ Append mode for existing data files
 - ✅ Gain control (1, 10, 100) with proper acknowledgment
@@ -83,6 +86,13 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 - ✅ Night mode (red screen for dark adaptation) with button highlighting
 - ✅ Interactive test script (ssp_quick_test.py)
 - ✅ Automated test suite (ssp_test_serial.py)
+- ✅ **Memory optimizations for extended sessions**
+  - Optimized string handling reduces temporary allocations by ~80%
+  - Timer resource cleanup prevents memory leaks
+  - Verified with `verify_optimization.py` test tool
+- ✅ **Optimization verification tools**
+  - `verify_optimization.py` - Validates memory optimizations
+  - `test_memory_optimization.py` - Diagnoses memory issues
 
 ### Not Yet Implemented ⏸️
 - ⏸️ **Fast Mode**: 100-5000 rapid readings

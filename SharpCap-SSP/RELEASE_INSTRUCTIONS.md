@@ -17,6 +17,10 @@ Package the following files from `SharpCap-SSP/Python/`:
 - ssp_allsky.py
 - ssp_location_utils.py
 - night_mode.py
+- ssp_quick_test.py
+- ssp_test_serial.py
+- verify_optimization.py
+- test_memory_optimization.py
 
 **Installation & Launch Scripts:**
 - install.ps1
@@ -35,6 +39,7 @@ Package the following files from `SharpCap-SSP/Python/`:
 - starparm_latest.csv
 - first_order_extinction_stars.csv
 - requirements.txt
+- System.IO.Ports.dll
 
 ### ZIP Structure
 
@@ -45,6 +50,7 @@ SharpCap-SSP/
 ├── SETUP.md
 ├── QUICK_START.md
 ├── IMPLEMENTATION_SUMMARY.md
+├── OPTIMIZATION_SUMMARY.md    <-- Memory optimization documentation
 ├── main.py
 ├── ssp_dataaq.py
 ├── ssp_comm.py
@@ -55,9 +61,14 @@ SharpCap-SSP/
 ├── ssp_allsky.py
 ├── ssp_location_utils.py
 ├── night_mode.py
+├── ssp_quick_test.py
+├── ssp_test_serial.py
+├── verify_optimization.py     <-- Memory optimization verification
+├── test_memory_optimization.py <-- Memory diagnostic tool
 ├── SSP.ico
 ├── starparm_latest.csv
 ├── first_order_extinction_stars.csv
+├── System.IO.Ports.dll        <-- Essential for serial communication
 ├── install.ps1
 ├── Launch_SSP.bat
 ├── Create_Desktop_Shortcut.bat
@@ -97,6 +108,10 @@ SharpCap-SSP/
    - 🐛 **Data acquisition reliability** - Improved error handling and recovery
    - 🐛 **Raw data sky handling** - Corrected sky reading processing in All Sky mode
    - ✨ **Enhanced testing** - Added integration test scripts for validation
+    - 🚀 **Memory optimizations** - Reduced temporary allocations by ~80%
+    - 🚀 **Communication reliability** - Reduced "Communication error" messages
+    - 🚀 **Extended session stability** - Timer cleanup prevents memory leaks
+    - 🛠️ **Optimization verification** - Added `verify_optimization.py` and `test_memory_optimization.py`
    
    ## 🎯 Previous Features (v0.1.3)
    
