@@ -671,6 +671,13 @@ The Coefficients menu provides tools for managing zero-point and standard error 
 ---
 
 ## Version History
+- **0.1.4** (2026-09-26) - Memory Optimizations & Stability
+  - Memory optimizations for extended observation sessions
+  - Reduced temporary string allocations by ~80%
+  - Timer resource cleanup prevents memory leaks
+  - Optimized serial communication for SSP5A compatibility
+  - Reduced "Communication error - count restarted" messages
+  - Added verification tools: `verify_optimization.py` and `test_memory_optimization.py`
 - **0.1.4** (2026-01-27)
   - All Sky Calibration tool for extinction coefficient calculation
   - K'v and K'bv determination with linear regression

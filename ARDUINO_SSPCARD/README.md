@@ -8,16 +8,21 @@ The Arduino SSPCARD replacement project provides a modern, open-source alternati
 
 It is still a work in progress. Currently it can read pulse counts and move the stepper motor but still need to calibrate the stepper motor drivers to move the sliders by the correct amount. 
 
+The latest working version is SSP5A_Arduino_SerialOnly.ino which only implements the data collection and works with SharpCap SSP.
+
 ## Quick Start
 
 ### Main Working Sketch
+**`Sketches/SSP5A_Arduino_SerialOnly.ino`** which only implements the data collection and works with SharpCap SSP.
+
+### Alternative Sketches
 **`Sketches/SSP5A_Arduino_BothAxes.ino`** - The primary working sketch that:
 - Controls filter wheel stepper motor (moves both X and Y axes together)
 - Implements SSP protocol for SSPData3 compatibility
 - Includes aggressive serial noise filtering
 - No startup messages (completely silent on power-up)
 
-### Alternative Sketches
+
 - **`Sketches/SSP5A_Arduino_Stepper_NoStartup.ino`** - No startup messages version
 - **`Sketches/SSP5A_Stepper_Diagnostic.ino`** - Diagnostic tool for stepper motor testing
 

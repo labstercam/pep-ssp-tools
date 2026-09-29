@@ -1002,10 +1002,15 @@ class SSPDataAcquisitionWindow(Form):
             MessageBox.Show(message, "Disconnection", MessageBoxButtons.OK, MessageBoxIcon.Information)
     
     def _on_form_closing(self, sender, event):
-        """Handle form closing event - disconnect COM port."""
+        """Handle form closing event - disconnect COM port and cleanup timer."""
         if self.comm.is_connected:
             success, message = self.comm.disconnect()
             self._update_status(message)
+        
+        # Cleanup timer (important for memory management)
+        if hasattr(self, 'time_timer'):
+            self.time_timer.Stop()
+            self.time_timer.Dispose()
     
     def _on_select_com_port(self, sender, event):
         """Handle Select SSP COM Port menu item."""
