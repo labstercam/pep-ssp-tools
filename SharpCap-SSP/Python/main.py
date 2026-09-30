@@ -6,8 +6,8 @@ Main entry point for SharpCap-SSP photometer control tool.
 Provides integration between Optec SSP photometers and SharpCap software.
 
 Author: pep-ssp-tools project
-Version: 0.1.2
-Date: January 2026
+Version: 0.1.5
+Date: September 2026
 """
 
 # IronPython CLR imports for .NET integration
@@ -91,7 +91,7 @@ class SSPMainWindow(Form):
     
     def __init__(self):
         """Initialize the main window."""
-        self.Text = "SharpCap-SSP Photometer Control v0.1.2"
+        self.Text = "SharpCap-SSP Photometer Control v0.1.5"
         self.Width = 720
         self.Height = 525
         self.StartPosition = FormStartPosition.CenterScreen
@@ -143,7 +143,7 @@ class SSPMainWindow(Form):
         description_text += "  * Configuration compatible with SSPDataq\r\n"
         description_text += "  * Night mode UI for dark adaptation\r\n"
         description_text += "  * Output in standard .raw format\r\n\r\n"
-        description_text += "VERSION: v0.1.3 (Alpha)\r\n"
+        description_text += "VERSION: v0.1.5 (Alpha)\r\n"
         description_text += "Development Status: Core functionality implemented\r\n\r\n"
         description_text += "For documentation, see:\r\n"
         description_text += "../SSPDataq/Analysis/SSPDataq_Software_Overview.md"
@@ -267,6 +267,7 @@ class SSPMainWindow(Form):
                 sys.path.append(script_dir)
             
             import ssp_dataaq
+            import ssp_docking
             # Pass SharpCap object and CoordinateParser (or None) to the window
             sharpcap_obj = SharpCap if SHARPCAP_AVAILABLE else None
             coord_parser = CoordinateParser if SHARPCAP_AVAILABLE else None
@@ -275,7 +276,7 @@ class SSPMainWindow(Form):
             self.WindowState = FormWindowState.Minimized
             
             # Show the data acquisition window with a callback to restore the launcher when closed
-            ssp_dataaq.show_data_acquisition_window(
+            ssp_docking.show_docked_data_acquisition_window(
                 sharpcap=sharpcap_obj, 
                 coordinate_parser=coord_parser,
                 on_close_callback=self._restore_launcher
@@ -380,3 +381,4 @@ if SHARPCAP_AVAILABLE:
 else:
     # Only run automatically when executed as main script (not when imported or exec'd)
     launch_ssp_photometer()
+

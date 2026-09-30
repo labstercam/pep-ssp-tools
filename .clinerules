@@ -1,7 +1,6 @@
 # ==============================================================================
 # 1. FILE ACCESS RESTRICTIONS & AGENT BEHAVIOUR
 # ==============================================================================
-- Read and edit files using the Cline/VSCode interface. Avoid using command line or external tools unless it is necessary
 - Never read files inside .venv/, venv/, env/, or __pycache__/.
 - Do not read raw astronomical video or image data files (.fits, .ser, .avi, .png) unless explicitly asked.
 - Do not read binary files such as .pdf, .docx, or .xlsx unless explicitly asked.
