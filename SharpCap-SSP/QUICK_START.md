@@ -15,23 +15,24 @@ SharpCap-SSP provides SSP photometer control for use with SharpCap or standalone
 - ✅ Serial cable connected to PC
 
 **One-Time Setup:**
-1. Copy `SharpCap-SSP\Python` folder to:
+1. Download the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.5
+2. Unzip the contents. Recommend to your \Documents\Sharp\SSP:
    ```
-   C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python
-   ```
-
-2. In SharpCap, go to **Tools → Settings → Scripting**
-
-3. Set **Startup Script** to:
-   ```
-   C:\Users\YourName\Documents\SharpCap\Scripts\SharpCap-SSP\Python\main.py
+   C:\Users\YourName\Documents\SharpCap\SSP
    ```
 
-4. Restart SharpCap - **"PEP"** button appears in toolbar
+3. In SharpCap, go to **Tools → Settings → Scripting**
+
+4. Set **Startup Script** to:
+   ```
+   C:\Users\YourName\Documents\SharpCap\SSP\main.py
+   ```
+
+5. Restart SharpCap - **"PEP"** button appears in toolbar
    - Button displays the SSP photometer icon
    - Located in the main SharpCap toolbar
 
-5. Click **PEP** to launch the SSP control window
+6. Click **PEP** to launch the SSP control window
 
 **Alternative - Manual Launch:**
 - Go to **Tools → Scripting Console**
@@ -53,9 +54,10 @@ Done! All dependencies are included.
 
 **One-Time Setup:**
 1. Download and install IronPython 3.4: https://github.com/IronLanguages/ironpython3/releases
-2. Navigate to the Python folder in File Explorer
-3. Right-click `install.ps1` and select **"Run with PowerShell"**
-4. Double-click `Create_Desktop_Shortcut.bat` to create a desktop icon
+2. Download and unzip the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.5, recommend unzip to \Documents\Sharp\SSP
+3. Navigate to that folder in File Explorer
+4. Right-click `install.ps1` and select **"Run with PowerShell"**
+5. Double-click `Create_Desktop_Shortcut.bat` to create a desktop icon
 
 **Daily Use:**
 - Double-click the **"SSP Photometer"** desktop icon
