@@ -17,6 +17,7 @@ Package the following files from `SharpCap-SSP/Python/`:
 - ssp_allsky.py
 - ssp_location_utils.py
 - night_mode.py
+- ssp_docking.py
 - ssp_quick_test.py
 - ssp_test_serial.py
 - verify_optimization.py
@@ -50,7 +51,8 @@ SharpCap-SSP/
 ├── SETUP.md
 ├── QUICK_START.md
 ├── IMPLEMENTATION_SUMMARY.md
-├── OPTIMIZATION_SUMMARY.md    <-- Memory optimization documentation
+├── OPTIMIZATION_SUMMARY.md
+├── DOCKING.md    <-- Docking implementation guide
 ├── main.py
 ├── ssp_dataaq.py
 ├── ssp_comm.py
@@ -61,6 +63,7 @@ SharpCap-SSP/
 ├── ssp_allsky.py
 ├── ssp_location_utils.py
 ├── night_mode.py
+├── ssp_docking.py
 ├── ssp_quick_test.py
 ├── ssp_test_serial.py
 ├── verify_optimization.py     <-- Memory optimization verification
@@ -83,35 +86,48 @@ SharpCap-SSP/
 2. **Create new release:**
    - Click "Releases" (right sidebar)
    - Click "Create a new release"
-   - Tag version: `v0.1.4`
+   - Tag version: `v0.1.5`
    - Target: `main` branch
-   - Release title: `SharpCap-SSP v0.1.4 - All Sky Calibration & Bug Fixes`
+   - Release title: `SharpCap-SSP v0.1.5 - Binning, .tab Export, Arduino SSPCARD, Docking & Bug Fixes`
 
 4. **Write release notes:**
    ```markdown
-   # SharpCap-SSP v0.1.4 - All Sky Calibration & Bug Fixes
+   # SharpCap-SSP v0.1.5 - Binning, .tab Export, Arduino SSPCARD, Docking & Bug Fixes
    
-   Control software for Optec SSP-3a/SSP-5a photometers with SharpCap integration.
+   Control software for Optec SSP3 and SSP5 PEP photometers with SharpCap integration.
    
-   ## 🎯 Major Features in v0.1.4
+   ## 🎯 Major Features in v0.1.5
    
-   ### All Sky Calibration Tool
-   - ✅ **Raw data file viewer** - View and analyze extinction observation data
-   - ✅ **Extinction coefficient calculation** - First order atmospheric extinction analysis
-   - ✅ **Multi-filter support** - Calculate extinction for each filter independently
-   - ✅ **Data visualization** - Plot magnitude vs. airmass with linear regression
-   - ✅ **Quality metrics** - R² values and slope uncertainty for each fit
-   - ✅ **Export results** - Save extinction coefficients and analysis plots
+   ### Binning for Saturation Avoidance
+   - ✅ **New 6-interval read mode** - Automatically sums to 3 readings for Excel import
+   - ✅ **New 8-interval read mode** - Automatically sums to 4 readings for Excel import
    
+   ### .tab File Export
+   - ✅ **Tab-separated export** - New export format for data acquisition results (.raw still generated)
+   - ✅ **Direct Excel paste** - .tab files can be copied directly into Excel spreadsheets
+   
+   ### Dockable SSP Data Acquisition Window
+   - ✅ **Bottom-docking** - Window snaps to SharpCap's bottom edge
+   - ✅ **User-resizable** - Height and width persist between launches
+   - ✅ **Dock/Undock toggle** - File menu option to switch between docked and floating
+   - ✅ **Taskbar accessible** - Window always findable via taskbar click
+   - ✅ **Z-order management** - Stays on top of SharpCap without stealing focus
+
    ### Bug Fixes & Improvements
-   - 🐛 **Integration time handling** - Fixed issues with SSP settings synchronization
-   - 🐛 **Data acquisition reliability** - Improved error handling and recovery
-   - 🐛 **Raw data sky handling** - Corrected sky reading processing in All Sky mode
-   - ✨ **Enhanced testing** - Added integration test scripts for validation
-    - 🚀 **Memory optimizations** - Reduced temporary allocations by ~80%
-    - 🚀 **Communication reliability** - Reduced "Communication error" messages
-    - 🚀 **Extended session stability** - Timer cleanup prevents memory leaks
-    - 🛠️ **Optimization verification** - Added `verify_optimization.py` and `test_memory_optimization.py`
+   - 🐛 **Memory leak fix** - Fixed out-of-memory errors during long acquisition runs
+   - 🐛 **Timer cleanup** - Proper disposal prevents handle leaks in extended sessions
+   - ✨ **Docking support module** - New ssp_docking.py with DOCKING.md documentation
+   - 🚀 **Binning modes** - New 6/8-interval reads with automatic summing
+   - 🚀 **.tab file export** - Direct Excel-compatible output format
+   - 🚀 **Arduino SSPCARD support** - Data acquisition with Arduino interface
+   
+### Arduino SSPCARD Replacement
+   - ✅ **Design and build instructions** - Complete guide for Arduino-based SSPCARD replacement
+   - ✅ **CNC shield stepper control** - Drives filter slider and shutter mechanisms
+   - ✅ **SSP protocol compatibility** - Full serial protocol support for SSP-5 communication
+   - ✅ **Open-source hardware** - Arduino firmware and schematics provided
+   - ✅ **Data acquisition support** - SSP data collection works with the Arduino interface
+
    
    ## 🎯 Previous Features (v0.1.3)
    
@@ -275,13 +291,13 @@ SharpCap-SSP/
 
 The release will be available at:
 - Direct link: `https://github.com/labstercam/pep-ssp-tools/releases/latest`
-- Download link: `https://github.com/labstercam/pep-ssp-tools/releases/download/v0.1.4/SharpCap-SSP-v0.1.4.zip`
+- Download link: `https://github.com/labstercam/pep-ssp-tools/releases/download/v0.1.5/SharpCap-SSP-v0.1.5.zip`
 
 Update README.md with this download link.
 
 ---
 
-## Release Checklist for v0.1.4
+## Release Checklist for v0.1.5
 
 Before creating the release, verify:
 
@@ -342,3 +358,4 @@ Before creating the release, verify:
   - [ ] Connection status visible
   - [ ] Retry attempts tracked
   - [ ] Acknowledgments reported
+
