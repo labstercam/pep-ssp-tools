@@ -243,6 +243,22 @@ void handleSerialCommunication() {
     }
 }
 
+// Decode the 4-digit SSP integration code (hundredths of a second) to milliseconds.
+// Matches the SI codes sent by the SharpCap addin / original SSPDataq:
+//   0002=0.02s  0005=0.05s  0010=0.10s  0050=0.50s  0100=1.00s  0500=5.00s  1000=10.00s
+// Returns 0 for an unrecognized code.
+uint16_t decodeIntegration(const char* code) {
+    if (strcmp(code, "0002") == 0) return 20;
+    if (strcmp(code, "0005") == 0) return 50;
+    if (strcmp(code, "0010") == 0) return 100;
+    if (strcmp(code, "0050") == 0) return 500;
+    if (strcmp(code, "0100") == 0) return 1000;
+    if (strcmp(code, "0500") == 0) return 5000;
+    if (strcmp(code, "1000") == 0) return 10000;
+    return 0;
+}
+
+
 void processCommand(const char* command) {
     lastCommandTime = millis();
     
@@ -300,27 +316,25 @@ void processCommand(const char* command) {
             
         case 'C':  // Get count
             if (strlen(command) == 6) {
-                char timeStr[5];
-                strncpy(timeStr, command + 2, 4);
-                timeStr[4] = '\0';
-                
-                uint16_t integrationTime = atoi(timeStr);
-                if (integrationTime >= INTEGRATION_MIN && integrationTime <= INTEGRATION_MAX) {
-                    startIntegration(integrationTime);
+                // The SC command only triggers a count; the integration time is
+                // the one latched by the SI command (matches original SSPDataq).
+                uint16_t requestedIntegrationTime = integrationTime;
+                if (requestedIntegrationTime > 0) {
+                    startIntegration(requestedIntegrationTime);
                     
                     // Wait for integration
                     unsigned long startTime = millis();
-                    unsigned long waitTime = integrationTime;
+                    unsigned long waitTime = requestedIntegrationTime;
                     
                     // SSPDataq3 timing overhead
-                    if (integrationTime == 1000) {
+                    if (requestedIntegrationTime == 1000) {
                         waitTime = 1150;
-                    } else if (integrationTime <= 1000) {
-                        waitTime = integrationTime * 1.15;
-                    } else if (integrationTime <= 5000) {
-                        waitTime = integrationTime * 1.03;
+                    } else if (requestedIntegrationTime <= 1000) {
+                        waitTime = requestedIntegrationTime * 1.15;
+                    } else if (requestedIntegrationTime <= 5000) {
+                        waitTime = requestedIntegrationTime * 1.03;
                     } else {
-                        waitTime = integrationTime * 1.015;
+                        waitTime = requestedIntegrationTime * 1.015;
                     }
                     
                     unsigned long endTime = startTime + waitTime;
@@ -377,8 +391,8 @@ void processCommand(const char* command) {
                 strncpy(timeStr, command + 2, 4);
                 timeStr[4] = '\0';
                 
-                uint16_t newIntegrationTime = atoi(timeStr);
-                if (newIntegrationTime >= INTEGRATION_MIN && newIntegrationTime <= INTEGRATION_MAX) {
+                uint16_t newIntegrationTime = decodeIntegration(timeStr);
+                if (newIntegrationTime > 0) {
                     integrationTime = newIntegrationTime;
                     Serial.print("!");
                 } else {

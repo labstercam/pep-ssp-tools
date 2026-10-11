@@ -60,17 +60,18 @@ SXnnnn
 **Notes**: Movement time ~100ms between adjacent positions
 
 ### 5. Get Count
-**Command**: `SCnnnn` (where nnnn = integration time in ms, 0001-9999)
-**Examples**:
-- `SC0100` → 100ms integration
-- `SC0500` → 500ms integration
-- `SC1000` → 1000ms (1 second) integration
-- `SC5000` → 5000ms (5 seconds) integration
-- `SC9999` → 9999ms integration
+**Command**: `SCnnnn` (always 6 characters; the 4-digit field is a placeholder)
 
 **Response**: `C=nnnnn` (5-digit count, zero-padded)
-**Purpose**: Performs integration and returns pulse count
-**Notes**: Actual wait time = integration time + overhead (15% for ≤1000ms, 3% for ≤5000ms, 1.5% for >5000ms)
+**Purpose**: Triggers one pulse-count integration using the integration time most recently set by the `SI` command.
+**Notes**:
+- The 4-digit field in `SC` is **not** read as a value. The real SSPCARD latches the integration
+  time from the preceding `SIxxxx` command and applies it to every count (the original SSPDataq3
+  software literally sends `SCnnnn`).
+- Because the payload is ignored, the field only serves to keep the command 6 characters long.
+  The SharpCap addin sends the same hundredths-of-a-second code it used for `SI`, so the command
+  is always valid, e.g. `SC0100` (1 s), `SC0500` (5 s), `SC1000` (10 s).
+- Actual host-side wait time = integration time + overhead (15% for <=1000ms, 3% for <=5000ms, 1.5% for >5000ms)
 
 ### 6. Set Gain
 **Command**: `SG00nn` (where nn = 01-03)
@@ -94,15 +95,16 @@ SXnnnn
 **Notes**: Takes ~2 seconds to move, SSPData3 waits 2000ms after command
 
 ### 8. Set Integration Time
-**Command**: `SInnnn` (where nnnn = integration time in ms, 0001-9999)
+**Command**: `SInnnn` (where nnnn = integration time in hundredths of a second)
 **Examples**:
-- `SI0100` → Set to 100ms
-- `SI1000` → Set to 1000ms
-- `SI9999` → Set to 9999ms
+- `SI0010` → Set to 0.10s (100ms)
+- `SI0100` → Set to 1.00s (1000ms)
+- `SI0500` → Set to 5.00s (5000ms)
+- `SI1000` → Set to 10.00s (10000ms)
 
 **Response**: `!`
-**Purpose**: Sets default integration time for subsequent count commands
-**Notes**: This time is used if `SC` command doesn't specify time
+**Purpose**: Sets the integration time used by all subsequent count (`SC`) commands
+**Notes**: The `SC` command does not carry the time; it always uses the value set here.
 
 ## Error Conditions
 
@@ -176,10 +178,10 @@ EEEEEE  → ! (Exit serial mode)
 ### Advanced Test Sequence (with pulse source):
 ```
 SSSSSS  → ! (Enter serial mode)
-SI0500  → ! (Set integration to 500ms)
-SC0500  → C=00250 (Count at 500Hz = 250 pulses)
-SC1000  → C=01000 (Count at 1kHz = 1000 pulses)
-SC2000  → C=02000 (Count at 1kHz = 2000 pulses)
+SI0500  → ! (Set integration to 5.00s; SC's digit field is ignored)
+SC0500  → C=xxxxx (Count using the 5.00s integration set by SI)
+SC1000  → C=xxxxx (Still 5.00s - only SI changes the integration time)
+SC2000  → C=xxxxx (Still 5.00s)
 EEEEEE  → ! (Exit serial mode)
 ```
 
@@ -221,7 +223,7 @@ EEEEEE  → ! (Exit serial mode)
 SSSSSS  - Enter serial mode
 EEEEEE  - Exit serial mode
 SF001n  - Select filter n (1-6)
-SCnnnn  - Get count for nnnn ms
+SCnnnn  - Get count (uses the integration set by SI)
 SG001n  - Set gain n (1-3)
 SVIEWn  - Mirror control (0=view, 1=record)
 SH0000  - Home filter

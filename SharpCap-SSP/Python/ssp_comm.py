@@ -291,8 +291,16 @@ class SSPCommunicator:
             # Clear buffer
             self._clear_buffer()
             
-            # Send count command - format: SCnnnn where nnnn is 4-digit integration time
-            command = "SC{:04d}".format(integration_ms)
+            # Map the integration time to the same 4-digit hundredths-of-a-second
+            # code used by the SI command so the SC command is always exactly 6
+            # characters. (The original SSPDataq sends the literal "SCnnnn": the
+            # SSP latches the time from SI and ignores the SC payload, so this
+            # also matches real-hardware behaviour.)
+            integ_codes = {20: "0002", 50: "0005", 100: "0010", 500: "0050",
+                           1000: "0100", 5000: "0500", 10000: "1000"}
+            if integration_ms not in integ_codes:
+                return (False, None, "Invalid integration time: " + str(integration_ms))
+            command = "SC" + integ_codes[integration_ms]
             self._write(command)
             
             # Determine which timing mode to use

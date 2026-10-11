@@ -208,6 +208,15 @@ class SSPQuickTestForm(Form):
         # Process events to update UI
         Application.DoEvents()
         
+        # Set the integration time on the photometer before counting
+        success, message = self.comm.set_integration(integ_ms)
+        if not success:
+            self._log("ERROR: " + message)
+            self.count_btn.Enabled = True
+            self.count_btn.Text = "Get Count"
+            return
+        self._log(message)
+        
         ut_start = DateTime.UtcNow
         success, count, error_msg = self.comm.get_slow_count(integ_ms)
         ut_end = DateTime.UtcNow

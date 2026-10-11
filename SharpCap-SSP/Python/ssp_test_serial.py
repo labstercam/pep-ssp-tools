@@ -90,6 +90,13 @@ def test_connection(com_port):
         print("Getting count with " + str(integ_sec) + " second integration...")
         print("  Please wait " + str(int(integ_sec + 1)) + " seconds...")
         
+        # Set the integration time on the photometer before counting
+        success, message = comm.set_integration(integ_ms)
+        if not success:
+            print("  ERROR: " + message)
+            print("")
+            continue
+        
         start_time = DateTime.UtcNow
         success, count, error_msg = comm.get_slow_count(integ_ms)
         end_time = DateTime.UtcNow
