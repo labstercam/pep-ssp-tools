@@ -214,6 +214,57 @@ if not self.SharpCap.Mounts.SelectedMount:
     MessageBox.Show("Use SharpCap Push To Assistant...")
 ```
 
+### Two-Stage GOTO Button
+A second GOTO button sits to the right of "GOTO Selected Star". It slews to the
+comparison star first, then the variable star, toggling on every completed slew.
+
+```python
+# Shared slew helper - both GOTO buttons use this
+def _slew_to_star(self, star, star_type):  # returns True on success, False on failure
+    ...
+
+def _on_goto_stage(self, sender, event):
+    if self.auto_goto_stage == 'comp':
+        star, star_type = self.current_target.comparison, "Comparison"
+    else:
+        star, star_type = self.current_target.variable, "Variable"
+    if self._slew_to_star(star, star_type):
+        # Toggle Comp <-> Var and update the button label
+        ...
+```
+
+`self.auto_goto_stage` starts as `'comp'` and is reset in `_on_select_star`
+whenever a new target is selected. The button is left disabled for extinction
+targets (they have no comparison star).
+
+### Object Dropdown Sync on GOTO
+The GOTO buttons sync the Object dropdown (and Catalog combo) to the star being
+slewed to, so the data OBJECT column and the data grid match where the scope
+points. The two-stage button always syncs; "GOTO Selected Star" only syncs when
+an actual catalog star is selected (base items like SKY/CATALOG/New Object are
+left untouched).
+
+```python
+# _star_display_name('V'/'C'/'K') -> combo display name ("... (Comp)", "... (Check)")
+# _select_object_display(name)    -> sets Object combo + syncs Catalog combo
+```
+
+**Gotcha:** `object_combo.SelectionChangeCommitted` (bound to `_on_object_changed`)
+does NOT fire for programmatic `SelectedIndex` changes, so `_select_object_display`
+calls `_set_catalog_for_object()` directly and guards with `self.updating_object_combo`.
+
+### Mutual GOTO Button Lock
+Both GOTO buttons are disabled for the duration of a slew so a second slew cannot
+be started mid-move (the slew runs `Application.DoEvents()` via `_update_status`).
+
+```python
+self._set_goto_buttons_enabled(False)   # before the slew
+try:
+    ...
+finally:
+    self._set_goto_buttons_enabled(True)  # stage button only re-enabled if a comp star exists
+```
+
 ## Testing Strategy
 
 ### test_goto.py Structure
@@ -221,7 +272,8 @@ if not self.SharpCap.Mounts.SelectedMount:
 2. **Catalog Tests** - Check CSV loading and coordinate calculations
 3. **SharpCap Detection** - Verify standalone vs SharpCap mode
 4. **Button Logic** - Confirm conditional creation
-5. **Coordinate Formatting** - Validate format strings
+5. **Auto GOTO Stage Logic** - Verify Comp/Var toggle and reset
+6. **Coordinate Formatting** - Validate format strings
 
 ### Debug Output Pattern
 ```python

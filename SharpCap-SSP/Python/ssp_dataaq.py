@@ -99,6 +99,9 @@ class SSPDataAcquisitionWindow(Form):
         # Store currently selected target triple for GOTO functionality
         self.current_target = None
         
+        # Two-stage auto-GOTO button state: 'comp' (slew to comparison first) or 'var'
+        self.auto_goto_stage = 'comp'
+        
         # Data arrays
         self.data_array = []
         self.saved_data = []
@@ -504,6 +507,17 @@ class SSPDataAcquisitionWindow(Form):
             self.goto_button.Click += self._on_goto_target
             self.goto_button.BringToFront()  # Ensure it's on top
             self.Controls.Add(self.goto_button)
+            
+            # Two-stage GOTO button (Comp <-> Var) to the right of the GOTO button
+            stage_x = start_x + self.goto_button.Size.Width + 10  # 10px gap
+            self.goto_stage_button = Button()
+            self.goto_stage_button.Text = "GOTO Comp"
+            self.goto_stage_button.Location = Point(stage_x, start_y)
+            self.goto_stage_button.Size = Size(150, 30)  # Match GOTO button size
+            self.goto_stage_button.Enabled = False  # Disabled until target selected
+            self.goto_stage_button.Click += self._on_goto_stage
+            self.goto_stage_button.BringToFront()  # Ensure it's on top
+            self.Controls.Add(self.goto_stage_button)
         else:
             pass
     
@@ -1849,6 +1863,12 @@ class SSPDataAcquisitionWindow(Form):
             else:
                 pass
             
+            # Enable two-stage GOTO button (has both Comp and Var stars) and reset to Comp
+            self.auto_goto_stage = 'comp'
+            if self.sharpcap_available and hasattr(self, 'goto_stage_button'):
+                self.goto_stage_button.Text = "GOTO Comp"
+                self.goto_stage_button.Enabled = True
+            
             # Update the current target label
             self.current_target_label.Text = "Current Target: Var=%s | Comp=%s | Check=%s" % (
                 target.variable.name,
@@ -1942,6 +1962,53 @@ class SSPDataAcquisitionWindow(Form):
                         self.catalog_combo.SelectedIndex = i
                         break
     
+    def _star_display_name(self, catalog_type):
+        """Return the Object-dropdown display name for a catalog star type.
+        
+        Args:
+            catalog_type: 'V' (variable), 'C' (comparison), or 'K' (check)
+        
+        Returns:
+            The display name stored in the Object combo / star_name_map, or None
+            if the corresponding star is not available.
+        """
+        if not self.current_target:
+            return None
+        
+        if catalog_type == 'C':
+            comp = self.current_target.comparison
+            return comp.name + " (Comp)" if comp else None
+        elif catalog_type == 'K':
+            check = self.current_target.check
+            return check.name + " (Check)" if check else None
+        else:
+            var = self.current_target.variable
+            return var.name if var else None
+    
+    def _select_object_display(self, display_name):
+        """Select a star in the Object dropdown and sync the Catalog combo.
+        
+        The Object combo's SelectionChangeCommitted event does not fire for
+        programmatic changes, so the Catalog combo is updated explicitly.
+        
+        Args:
+            display_name: Display name of the star (as stored in the combo)
+        """
+        if not display_name:
+            return
+        
+        self.updating_object_combo = True
+        try:
+            for i in range(self.object_combo.Items.Count):
+                if str(self.object_combo.Items[i]) == display_name:
+                    self.object_combo.SelectedIndex = i
+                    break
+        finally:
+            self.updating_object_combo = False
+        
+        # Programmatic change won't fire _on_object_changed, so sync catalog here
+        self._set_catalog_for_object(display_name)
+    
     def _on_select_extinction_star(self, sender, event):
         """Handle select extinction star menu click."""
         if not self.extinction_catalog or len(self.extinction_catalog) == 0:
@@ -2001,6 +2068,12 @@ class SSPDataAcquisitionWindow(Form):
             if self.sharpcap_available and hasattr(self, 'goto_button'):
                 self.goto_button.Enabled = True
             
+            # Disable two-stage GOTO button - extinction target has no comparison star
+            self.auto_goto_stage = 'comp'
+            if self.sharpcap_available and hasattr(self, 'goto_stage_button'):
+                self.goto_stage_button.Text = "GOTO Comp"
+                self.goto_stage_button.Enabled = False
+            
             # Update the current target label
             airmass_str = "Airmass=%.2f" % dialog.selected_airmass if dialog.selected_airmass else "Airmass=N/A"
             self.current_target_label.Text = "Current Target (Extinction): %s (V=%.2f, %s)" % (
@@ -2047,6 +2120,18 @@ class SSPDataAcquisitionWindow(Form):
                     self.catalog_combo.SelectedIndex = i
                     break
     
+    def _set_goto_buttons_enabled(self, enabled):
+        """Enable/disable both GOTO buttons (mutual lock during a slew).
+        
+        The two-stage button also requires a comparison star, so it stays
+        disabled for extinction targets even when enabled is True.
+        """
+        if hasattr(self, 'goto_button'):
+            self.goto_button.Enabled = enabled
+        if hasattr(self, 'goto_stage_button'):
+            has_comp = bool(self.current_target and self.current_target.comparison)
+            self.goto_stage_button.Enabled = enabled and has_comp
+    
     def _on_goto_target(self, sender, event):
         """Handle GOTO button click - slew telescope to selected star."""
         if not self.sharpcap_available:
@@ -2065,8 +2150,10 @@ class SSPDataAcquisitionWindow(Form):
         # Determine which star (var, comp, or check) to slew to
         star = None
         star_type = "Target"
+        catalog_type = 'V'  # Default to variable if not found in mapping
+        is_catalog_star = selected_obj in self.star_name_map
         
-        if selected_obj in self.star_name_map:
+        if is_catalog_star:
             actual_name, catalog_type = self.star_name_map[selected_obj]
             if catalog_type == 'V':
                 star = self.current_target.variable
@@ -2087,6 +2174,32 @@ class SSPDataAcquisitionWindow(Form):
                           "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             return
         
+        # Sync the Object dropdown only when an actual catalog star was selected;
+        # base items (SKY/CATALOG/New Object) are left untouched
+        if is_catalog_star:
+            self._select_object_display(self._star_display_name(catalog_type))
+        
+        # Mutually lock both GOTO buttons during the slew
+        self._set_goto_buttons_enabled(False)
+        try:
+            # Perform the slew (shared with the two-stage GOTO button)
+            self._slew_to_star(star, star_type)
+        finally:
+            self._set_goto_buttons_enabled(True)
+    
+    def _slew_to_star(self, star, star_type):
+        """Slew the telescope to a star.
+        
+        Uses SharpCap mount control when a mount is connected, otherwise falls back
+        to a manual GOTO with the coordinates copied to the clipboard.
+        
+        Args:
+            star: StarData object with the target coordinates
+            star_type: Human-readable label for status messages (e.g. "Comparison")
+        
+        Returns:
+            True if the slew (or manual fallback) was performed, else False
+        """
         # Get RA and Dec in decimal hours and degrees
         ra_hours = star.ra_hours + star.ra_minutes/60.0 + star.ra_seconds/3600.0
         dec_degrees = star.dec_degrees_decimal
@@ -2097,7 +2210,7 @@ class SSPDataAcquisitionWindow(Form):
             if CancellationToken is None:
                 MessageBox.Show("GOTO functionality requires SharpCap environment.",
                               "Not Available", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                return
+                return False
             
             # Check if mount control is available
             if hasattr(self.SharpCap, 'Mounts') and self.SharpCap.Mounts.SelectedMount:
@@ -2148,12 +2261,62 @@ class SSPDataAcquisitionWindow(Form):
                 
                 self._update_status("Manual GOTO: %s - coordinates copied to clipboard" % star.name)
             
+            return True
+            
         except Exception as e:
             import traceback
             error_msg = "Error slewing telescope:\n\n%s\n\nDetails:\n%s" % (str(e), traceback.format_exc())
             print("GOTO execution error: %s" % str(e))
             MessageBox.Show(error_msg, "GOTO Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             self._update_status("GOTO failed: " + str(e))
+            return False
+    
+    def _on_goto_stage(self, sender, event):
+        """Handle two-stage GOTO button click - slew to Comp, then Var (toggles each time)."""
+        if not self.sharpcap_available:
+            MessageBox.Show("GOTO is only available when running in SharpCap.",
+                          "Not Available", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            return
+        
+        if not self.current_target:
+            MessageBox.Show("No target selected. Use Catalog > Select Target Star first.",
+                          "No Target", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        
+        # Determine which star to slew to based on the current stage
+        if self.auto_goto_stage == 'comp':
+            star = self.current_target.comparison
+            star_type = "Comparison"
+        else:
+            star = self.current_target.variable
+            star_type = "Variable"
+        
+        if not star:
+            MessageBox.Show("The %s star is not available for this target." % star_type.lower(),
+                          "Star Not Available", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        
+        # Sync the Object dropdown to the star we are about to slew to
+        catalog_type = 'C' if self.auto_goto_stage == 'comp' else 'V'
+        self._select_object_display(self._star_display_name(catalog_type))
+        
+        # Mutually lock both GOTO buttons during the slew
+        self._set_goto_buttons_enabled(False)
+        
+        try:
+            if self._slew_to_star(star, star_type):
+                # Toggle stage and label: Comp -> Var -> Comp
+                if self.auto_goto_stage == 'comp':
+                    self.auto_goto_stage = 'var'
+                    new_text = "GOTO Var"
+                else:
+                    self.auto_goto_stage = 'comp'
+                    new_text = "GOTO Comp"
+                
+                if hasattr(self, 'goto_stage_button'):
+                    self.goto_stage_button.Text = new_text
+        finally:
+            self._set_goto_buttons_enabled(True)
 
 
 class StarSelectionDialog(Form):
