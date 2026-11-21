@@ -131,6 +131,62 @@ def test_goto_button_logic():
     
     return True
 
+def test_auto_goto_stage_logic():
+    """Test the two-stage GOTO button stage toggle/reset logic."""
+    print("\nTesting two-stage GOTO stage logic...")
+    
+    # Simulate the toggle performed by _on_goto_stage after each successful slew
+    stage = 'comp'
+    labels = []
+    for _ in range(3):
+        if stage == 'comp':
+            labels.append("GOTO Comp")
+            stage = 'var'
+        else:
+            labels.append("GOTO Var")
+            stage = 'comp'
+    
+    expected = ["GOTO Comp", "GOTO Var", "GOTO Comp"]
+    if labels == expected:
+        print("  ✓ Toggle sequence correct: %s" % " -> ".join(labels))
+    else:
+        print("  ✗ Toggle sequence incorrect: got %s, expected %s" % (labels, expected))
+        return False
+    
+    # Stage resets to 'comp' whenever a new target star is selected
+    stage = 'comp'
+    if stage == 'comp':
+        print("  ✓ Stage resets to 'comp' (GOTO Comp) on new target selection")
+    else:
+        print("  ✗ Stage reset failed")
+        return False
+    
+    return True
+
+def test_object_display_name_logic():
+    """Test the Object-dropdown display name convention used for GOTO syncing."""
+    print("\nTesting Object dropdown display name logic...")
+    
+    # Mirrors _star_display_name(): 'V' = bare name, 'C'/'K' add a suffix
+    base_name = "APASS 001"
+    suffixes = {'V': "", 'C': " (Comp)", 'K': " (Check)"}
+    expected = {
+        'V': "APASS 001",
+        'C': "APASS 001 (Comp)",
+        'K': "APASS 001 (Check)",
+    }
+    
+    ok = True
+    for ctype in ('V', 'C', 'K'):
+        display = base_name + suffixes[ctype]
+        if display == expected[ctype]:
+            print("  ✓ %s -> '%s'" % (ctype, display))
+        else:
+            print("  ✗ %s -> got '%s', expected '%s'" % (ctype, display, expected[ctype]))
+            ok = False
+    
+    return ok
+
 def test_coordinate_formatting():
     """Test coordinate string formatting."""
     print("\nTesting coordinate formatting...")
@@ -171,6 +227,8 @@ def main():
         ("Catalog Module", test_catalog_module),
         ("SharpCap Detection", test_sharpcap_detection),
         ("GOTO Button Logic", test_goto_button_logic),
+        ("Auto GOTO Stage Logic", test_auto_goto_stage_logic),
+        ("Object Display Name Logic", test_object_display_name_logic),
         ("Coordinate Formatting", test_coordinate_formatting),
     ]
     

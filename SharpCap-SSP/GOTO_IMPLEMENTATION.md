@@ -9,6 +9,7 @@ Added telescope GOTO control for SharpCap-SSP to automatically slew the telescop
 - GOTO button slews to whichever star is currently selected in the Object dropdown
 - Automatically handles variable, comparison, and check stars
 - Shows confirmation dialog with star name and coordinates before slewing
+- Syncs the Object dropdown (and Catalog combo) to the slewed-to star (only when an actual catalog star is selected; base items like SKY/CATALOG/New Object are left untouched)
 
 ### 2. **SharpCap Integration**
 - Uses `SharpCap.Mounts.SelectedMount` API for mount control
@@ -25,6 +26,17 @@ Added telescope GOTO control for SharpCap-SSP to automatically slew the telescop
 - GOTO button only appears in SharpCap mode
 - Button disabled until target is selected via "Catalog > Select Target Star"
 - No errors or UI artifacts in standalone mode
+
+### 5. **Two-Stage GOTO Button (Comp -> Var)**
+- Second GOTO button placed to the right of "GOTO Selected Star"
+- Initially labelled "GOTO Comp": slews to the comparison star first
+- After the comp slew completes it becomes "GOTO Var": slews to the variable star
+- Toggles on every completed slew (Comp -> Var -> Comp ...)
+- Resets to "GOTO Comp" whenever a new target star is selected
+- Immediately syncs the Object dropdown (and Catalog combo) to the slewed-to star
+- Both GOTO buttons are disabled for the duration of a slew (mutual lock)
+- Disabled until a catalog target is selected (it needs both Comp and Var stars)
+- Left disabled for extinction-star targets (no comparison star available)
 
 ## Implementation Details
 
@@ -160,6 +172,13 @@ A comprehensive test suite is available in `test_goto.py` that verifies:
 5. Manual GOTO dialog appears
 6. Coordinates copied to clipboard
 7. Use SharpCap Push To Assistant to slew manually
+
+### Two-Stage GOTO (Comp first, then Var)
+1. Select target using "Catalog > Select Target Star"
+2. Click "GOTO Comp" - telescope slews to the comparison star
+3. Button now reads "GOTO Var" - click again to slew to the variable star
+4. After the var slew the button toggles back to "GOTO Comp"
+5. Selecting a new target resets the button to "GOTO Comp"
 
 ## API Reference
 
