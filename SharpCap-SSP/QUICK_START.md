@@ -15,7 +15,7 @@ SharpCap-SSP provides SSP photometer control for use with SharpCap or standalone
 - ✅ Serial cable connected to PC
 
 **One-Time Setup:**
-1. Download the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.5
+1. Download the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.6
 2. Unzip the contents. Recommend to your \Documents\Sharp\SSP:
    ```
    C:\Users\YourName\Documents\SharpCap\SSP
@@ -54,7 +54,7 @@ Done! All dependencies are included.
 
 **One-Time Setup:**
 1. Download and install IronPython 3.4: https://github.com/IronLanguages/ironpython3/releases
-2. Download and unzip the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.5, recommend unzip to \Documents\Sharp\SSP
+2. Download and unzip the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.6, recommend unzip to \Documents\Sharp\SSP
 3. Navigate to that folder in File Explorer
 4. Right-click `install.ps1` and select **"Run with PowerShell"**
 5. Double-click `Create_Desktop_Shortcut.bat` to create a desktop icon
@@ -673,6 +673,19 @@ The Coefficients menu provides tools for managing zero-point and standard error 
 ---
 
 ## Version History
+- **0.1.6** (2026-11-25) - Memory Leak Fix for Long Sessions
+  - Fixed `OutOfMemoryException` / crash after ~100 readings when a guide camera was running
+  - SSP waits now pump the UI message loop instead of blocking it, so camera frames are
+    released rather than queued
+  - Measured over a 99-minute soak: +6.6 MB total (was ~15.6 GB projected at the old rate)
+  - Fixed `_dock_timer` not stopping when the window closes
+  - Added close-mid-read and trial-mode re-entrancy guards
+  - Normalised module version strings (were a mix of 0.1.0, 0.1.2, 0.1.5 and 1.0.0)
+- **0.1.5** (2026) - Dockable Window, Binning, .tab Export
+  - Dockable SSP Data Acquisition window (snaps to SharpCap's bottom edge)
+  - 6 and 8-interval binning modes with automatic summing to 3 or 4 readings
+  - .tab tab-separated export for direct paste into Excel
+  - Arduino SSPCARD support
 - **0.1.4** (2026-09-26) - Memory Optimizations & Stability
   - Memory optimizations for extended observation sessions
   - Reduced temporary string allocations by ~80%

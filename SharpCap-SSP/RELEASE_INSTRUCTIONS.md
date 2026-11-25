@@ -34,6 +34,8 @@ Package the following files from `SharpCap-SSP/Python/`:
 - README.md (copy from parent directory)
 - QUICK_START.md (copy from parent directory)
 - IMPLEMENTATION_SUMMARY.md (copy from parent directory)
+- BUG_FIXES.md (copy from parent directory) - linked from README
+- MEMORY_ANALYSIS.md (copy from parent directory) - linked from README/BUG_FIXES
 
 **Assets:**
 - SSP.ico
@@ -52,6 +54,8 @@ SharpCap-SSP/
 ├── QUICK_START.md
 ├── IMPLEMENTATION_SUMMARY.md
 ├── OPTIMIZATION_SUMMARY.md
+├── BUG_FIXES.md            <-- Bug fix record (includes the memory leak fix)
+├── MEMORY_ANALYSIS.md      <-- Memory / OutOfMemoryException investigation
 ├── DOCKING.md    <-- Docking implementation guide
 ├── main.py
 ├── ssp_dataaq.py
@@ -86,17 +90,31 @@ SharpCap-SSP/
 2. **Create new release:**
    - Click "Releases" (right sidebar)
    - Click "Create a new release"
-   - Tag version: `v0.1.5`
-   - Target: `main` branch
-   - Release title: `SharpCap-SSP v0.1.5 - Binning, .tab Export, Arduino SSPCARD, Docking & Bug Fixes`
+   - Tag version: `v0.1.6`
+   - Target: `main` branch (note: this work was developed on `memory-leaks2`)
+   - Release title: `SharpCap-SSP v0.1.6 - Memory Leak Fix for Long Sessions`
 
 4. **Write release notes:**
    ```markdown
-   # SharpCap-SSP v0.1.5 - Binning, .tab Export, Arduino SSPCARD, Docking & Bug Fixes
+   # SharpCap-SSP v0.1.6 - Memory Leak Fix for Long Sessions
    
    Control software for Optec SSP3 and SSP5 PEP photometers with SharpCap integration.
    
-   ## 🎯 Major Features in v0.1.5
+   ## 🎯 Major Features in v0.1.6
+   
+   ### Memory Leak / Crash Fix for Long Sessions ⭐
+   - ✅ **Fixed `OutOfMemoryException` after ~100 readings** when a guide camera was running
+   - ✅ **SSP waits now pump the UI message loop** instead of blocking it, so a running
+     camera's frames are released rather than queued
+   - ✅ **Measured** over a 99-minute soak: **+6.6 MB total** (was ~15.6 GB projected at the
+     old rate), with the camera frame pool byte-identical at every 30-minute checkpoint
+   - ✅ **Fixed `_dock_timer`** not stopping when the window closes
+   - ✅ **Added re-entrancy guards** for closing the window mid-read and for trial mode
+   - ✅ Module version strings normalised to 0.1.6
+   
+   See `BUG_FIXES.md` section 6 and `MEMORY_ANALYSIS.md` for the full measurement record.
+   
+   ## 🎯 Previous Features (v0.1.5)
    
    ### Binning for Saturation Avoidance
    - ✅ **New 6-interval read mode** - Automatically sums to 3 readings for Excel import
@@ -114,7 +132,14 @@ SharpCap-SSP/
    - ✅ **Z-order management** - Stays on top of SharpCap without stealing focus
 
    ### Bug Fixes & Improvements
-   - 🐛 **Memory leak fix** - Fixed out-of-memory errors during long acquisition runs
+   - 🐛 **Fixed memory leak / crash in long sessions with a guide camera** - The SSP wait
+     loops now pump the UI message loop instead of blocking it, so a running camera's
+     frames are released instead of queued. Measured growth per 100-star session reduced
+     from ~14.9 GB to under 0.5 GB. See `BUG_FIXES.md` section 6 and `MEMORY_ANALYSIS.md`
+   - 🐛 **Fixed `_dock_timer` not stopping on close** - the dock timer no longer keeps the
+     window alive after it closes
+   - 🐛 **Close and trial-mode re-entrancy guards** - closing the window mid-read no longer
+     touches disposed controls, and trial mode can no longer re-enter itself
    - 🐛 **Timer cleanup** - Proper disposal prevents handle leaks in extended sessions
    - ✨ **Docking support module** - New ssp_docking.py with DOCKING.md documentation
    - 🚀 **Binning modes** - New 6/8-interval reads with automatic summing
@@ -193,7 +218,7 @@ SharpCap-SSP/
    
    ## Installation
    
-   **Download:** [SharpCap-SSP-v0.1.4.zip](link-will-be-auto-generated)
+   **Download:** [SharpCap-SSP-v0.1.6.zip](link-will-be-auto-generated)
    
    ### Quick Start:
    1. Download and extract the ZIP file
@@ -279,7 +304,7 @@ SharpCap-SSP/
    ```
 
 5. **Upload ZIP file:**
-   - Run `create_release_zip.ps1` to create `SharpCap-SSP-v0.1.4.zip`
+   - Run `create_release_zip.ps1` to create `SharpCap-SSP-v0.1.6.zip`
    - Drag and drop to "Attach binaries" section
 
 6. **Set as latest release:**
@@ -291,17 +316,17 @@ SharpCap-SSP/
 
 The release will be available at:
 - Direct link: `https://github.com/labstercam/pep-ssp-tools/releases/latest`
-- Download link: `https://github.com/labstercam/pep-ssp-tools/releases/download/v0.1.5/SharpCap-SSP-v0.1.5.zip`
+- Download link: `https://github.com/labstercam/pep-ssp-tools/releases/download/v0.1.6/SharpCap-SSP-v0.1.6.zip`
 
 Update README.md with this download link.
 
 ---
 
-## Release Checklist for v0.1.5
+## Release Checklist for v0.1.6
 
 Before creating the release, verify:
 
-- [ ] All version numbers updated to 0.1.4 in:
+- [ ] All version numbers updated to 0.1.6 in:
   - [ ] main.py
   - [ ] ssp_dataaq.py
   - [ ] ssp_comm.py
@@ -312,6 +337,15 @@ Before creating the release, verify:
   - [ ] ssp_allsky.py
   - [ ] ssp_location_utils.py
   - [ ] night_mode.py
+
+  > **Resolved (2026-11-25):** these strings *were* inconsistent - `main.py` said 0.1.5,
+  > most modules 0.1.2, `ssp_extinction.py`/`ssp_location_utils.py`/`ssp_quick_test.py`/
+  > `ssp_test_serial.py` 0.1.0, `ssp_allsky.py` 1.0.0, plus two stale 0.1.2 strings in
+  > `main.py` (footer label, console banner). All are now 0.1.6 and `ssp_docking.py` has a
+  > version header too. Verify before release:
+  > ```powershell
+  > Select-String -Path Python/*.py -Pattern '^Version:'
+  > ```
 
 - [ ] All Sky calibration tested:
   - [ ] Raw data file viewer loads .raw files
@@ -338,8 +372,8 @@ Before creating the release, verify:
 - [ ] Documentation updated:
   - [ ] QUICK_START.md includes All Sky calibration instructions
   - [ ] IMPLEMENTATION_SUMMARY.md updated with latest features
-  - [ ] README.md reflects v0.1.4 features
-  - [ ] RELEASE_INSTRUCTIONS.md has v0.1.4 notes
+  - [ ] README.md reflects v0.1.6 features
+  - [ ] RELEASE_INSTRUCTIONS.md has v0.1.6 notes
 
 - [ ] Star catalog functional:
   - [ ] Search by name works
@@ -358,4 +392,25 @@ Before creating the release, verify:
   - [ ] Connection status visible
   - [ ] Retry attempts tracked
   - [ ] Acknowledgments reported
+
+- [x] Memory behaviour verified over a 99-minute soak (2026-11-25) - see `MEMORY_ANALYSIS.md` Part 11:
+  - [x] `SharpCap-SSP/Python` deployed copy matched the repo (SHA256) before testing -
+        a stale deployment is silent and produces no output at all
+  - [x] External sampler run during the session:
+        `SharpCap-SSP/tools/monitor_sharpcap.ps1 -Label soak`
+  - [x] Private bytes stayed flat during capture with a camera running
+        (**+0.001 MB/s**, +6.64 MB total over 99.1 min; was ~+0.6-0.9 MB/s before the fix)
+  - [x] Handle count did not trend upward (moved **-5** over 99 minutes)
+  - [x] SharpCap's own 30-minute watchdog agreed: **frame pool and VirtualAlloc
+        byte-identical** at every checkpoint (the specific mechanism the fix targets)
+  - [ ] GOTO between readings does not reintroduce growth - validated in short runs
+        (Part 9.7 Run D) but not isolated during the 99-minute soak
+  - [ ] Closing the window mid-read ends cleanly (no exception in the SharpCap log)
+  - [ ] Docked window: no timer activity after close (undock/redock a few times)
+
+- [ ] Documentation consistent:
+  - [ ] README feature list and Development Status reflect the release
+  - [ ] BUG_FIXES.md records this release's fixes
+  - [ ] RELEASE_INSTRUCTIONS.md release notes match the tag
+  - [ ] `SharpCap-SSP-vX.Y.Z.zip` rebuilt with `create_release_zip.ps1` and attached
 

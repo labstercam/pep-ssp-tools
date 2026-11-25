@@ -6,7 +6,7 @@ Main entry point for SharpCap-SSP photometer control tool.
 Provides integration between Optec SSP photometers and SharpCap software.
 
 Author: pep-ssp-tools project
-Version: 0.1.5
+Version: 0.1.6
 Date: September 2026
 """
 
@@ -91,7 +91,7 @@ class SSPMainWindow(Form):
     
     def __init__(self):
         """Initialize the main window."""
-        self.Text = "SharpCap-SSP Photometer Control v0.1.5"
+        self.Text = "SharpCap-SSP Photometer Control v0.1.6"
         self.Width = 720
         self.Height = 525
         self.StartPosition = FormStartPosition.CenterScreen
@@ -143,7 +143,7 @@ class SSPMainWindow(Form):
         description_text += "  * Configuration compatible with SSPDataq\r\n"
         description_text += "  * Night mode UI for dark adaptation\r\n"
         description_text += "  * Output in standard .raw format\r\n\r\n"
-        description_text += "VERSION: v0.1.5 (Alpha)\r\n"
+        description_text += "VERSION: v0.1.6 (Alpha)\r\n"
         description_text += "Development Status: Core functionality implemented\r\n\r\n"
         description_text += "For documentation, see:\r\n"
         description_text += "../SSPDataq/Analysis/SSPDataq_Software_Overview.md"
@@ -249,7 +249,7 @@ class SSPMainWindow(Form):
         
         # Footer label
         footer_label = Label()
-        footer_label.Text = "Part of the pep-ssp-tools project | v0.1.2 Alpha"
+        footer_label.Text = "Part of the pep-ssp-tools project | v0.1.6 Alpha"
         footer_label.Location = Point(10, 460)
         footer_label.Size = Size(680, 20)
         footer_label.TextAlign = ContentAlignment.MiddleCenter
@@ -325,7 +325,7 @@ class SSPMainWindow(Form):
 def launch_ssp_photometer():
     """Main entry point for SharpCap-SSP."""
     print("=" * 60)
-    print("SharpCap-SSP Photometer Control v0.1.2")
+    print("SharpCap-SSP Photometer Control v0.1.6")
     print("=" * 60)
     print("")
     
@@ -354,14 +354,30 @@ def launch_ssp_photometer():
 # SharpCap Integration: Add custom button to toolbar
 if SHARPCAP_AVAILABLE:
     from System.Drawing import Image
+    from System.IO import MemoryStream  # Added for memory test (Phase 2)
+
+    # Added for memory test (Phase 2) - explicit references so that neither the
+    # stream nor the image can be collected: GDI+ requires the source stream to
+    # outlive the Image, and SharpCap keeps the Image for the toolbar button.
+    _ssp_icon_stream = None
+    _ssp_icon_image = None
     
     # Use the script_dir already defined at top of file
     icon_path = os.path.join(script_dir, "SSP.ico")
     
     try:
-        # Add custom button to SharpCap UI (same as occultation-manager)
+        # Add custom button to SharpCap UI
         if os.path.exists(icon_path):
-            SharpCap.AddCustomButton("PEP", Image.FromFile(icon_path), "SSP Photometer Control", launch_ssp_photometer)
+            # Added for memory test (Phase 2) - build the icon from memory rather
+            # than Image.FromFile. FromFile holds the file open for as long as
+            # the Image lives, and SharpCap retains the image for the toolbar
+            # button, so SSP.ico stayed locked for the whole session (verified:
+            # it was the only locked file in the script folder). ReadAllBytes
+            # closes the file immediately and the pixels are unchanged - a
+            # Bitmap copy could alter icon alpha.
+            _ssp_icon_stream = MemoryStream(System.IO.File.ReadAllBytes(icon_path))
+            _ssp_icon_image = Image.FromStream(_ssp_icon_stream)
+            SharpCap.AddCustomButton("PEP", _ssp_icon_image, "SSP Photometer Control", launch_ssp_photometer)
             print("PEP custom button added to SharpCap toolbar with icon")
         else:
             print(f"Warning: Icon file not found at {icon_path}")

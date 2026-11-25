@@ -7,6 +7,9 @@ No modification to existing ssp_dataaq.py needed.
 Usage:
     from ssp_docking import show_docked_data_acquisition_window
     show_docked_data_acquisition_window(sharpcap=SharpCap, ...)
+
+Author: pep-ssp-tools project
+Version: 0.1.6
 """
 
 import clr
@@ -168,6 +171,25 @@ class DockedDataAcquisitionWindow(ssp_dataaq.SSPDataAcquisitionWindow):
             self.config.save()
         except:
             pass
+
+    def _on_form_closing(self, sender, event):
+        """Stop the dock timer before the window is disposed.
+
+        Added for memory test. The base class subscribes its own
+        _on_form_closing during super().__init__ (which is this override), and
+        it disposes time_timer but knows nothing about _dock_timer. Without
+        this the 200 ms timer keeps running after close and keeps the window,
+        its controls and its event subscriptions alive.
+        """
+        try:
+            if getattr(self, '_dock_timer', None) is not None:
+                self._dock_timer.Stop()
+                self._dock_timer.Dispose()
+        except Exception:
+            pass
+
+        # Run the base cleanup (COM port disconnect, time_timer disposal)
+        super()._on_form_closing(sender, event)
 
 
 def show_docked_data_acquisition_window(sharpcap=None, coordinate_parser=None,

@@ -6,7 +6,7 @@ Manages configuration settings for SharpCap-SSP.
 Supports both JSON (master) and dparms.txt (backward compatibility) formats.
 
 Author: pep-ssp-tools project
-Version: 0.1.2
+Version: 0.1.6
 """
 
 import clr

@@ -1,7 +1,7 @@
 # pep-ssp-tools
 Tools for operating the Optec Photoelectric Photometers (PEP).
 
-**Current Version: v0.1.5** - Dockable SSP Data Acquisition Window
+**Current Version: v0.1.6** - Memory Leak Fix for Long Sessions
 
 Use entirely at your own risk. Please contact me with suggestions or feedback through the AAVSO PEP forum or through GitHub.
 
@@ -20,6 +20,11 @@ Working prototype of SSP data collection software using SharpCap. Features inclu
 - ✅ Automated and manual filter bar control
 - ✅ GOTO telescope integration
 - ✅ Night mode UI with proper button highlighting
+- ✅ **NEW:** Memory leak / `OutOfMemoryException` fix for long sessions with a guide camera
+  running — SSP waits now pump the UI message loop instead of blocking it. Measured over a
+  99-minute soak: +6.6 MB total, versus ~15.6 GB projected at the old rate
+  (see [BUG_FIXES.md](SharpCap-SSP/BUG_FIXES.md) section 6 and
+  [MEMORY_ANALYSIS.md](SharpCap-SSP/MEMORY_ANALYSIS.md))
 
 https://github.com/labstercam/pep-ssp-tools/tree/main/SharpCap-SSP
 
