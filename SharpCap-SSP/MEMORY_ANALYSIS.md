@@ -476,6 +476,22 @@ should be fixed regardless. Camera-side mitigations are in Phase 4.
 4. Keep the START button disabled for the whole operation via `try/finally`.
 5. Pump messages during the mount settle loop instead of a bare `time.sleep(1)` for up
    to 30 s (`ssp_dataaq.py:2237-2238`), so the GOTO window is not fully unpumped.
+6. Pump the mount async waits too - the slew (`StartSlewToAsync`), `WaitUntilSettled`,
+   and the optional `SolveAndSync` - via `_pump_until_complete` (`ssp_dataaq.py`), so no
+   part of the GOTO window blocks the frame queue unpumped. (Added with the
+   "Plate Solve and Sync" feature, which introduced a further multi-second unpumped
+   solve window.) START is locked for the duration so a pumped click cannot start an
+   acquisition mid-slew.
+
+   **Measured (2026-11-26, ASI462MM + CGX).** A logged GOTO+solve confirmed the solve
+   wait is **async and pollable**: `mount.SolveAndSync()` returns in **0.13 s** and the
+   pumped wait runs for **28.62 s** (`pumpable=True`), i.e. the UI message loop refreshes
+   ~20x/s for the whole solve and the frame queue drains. The solve window then measures
+   **+7.6 MB private / +11.3 MB working set over 28.8 s (+0.27 MB/s)**, reclaimed by the
+   `After SolveAndSync` forced-GC checkpoint (private returned *below* its pre-solve
+   value). No leak, and the screen updates throughout the GOTO and the solve. (An
+   earlier +123 MB reading did not reproduce; it was dominated by the working set
+   refilling after the settle loop's forced GC, not by solve growth.)
 
 This stops the host's frame/event queue from building up while the camera is running.
 Part 8 shows the queue is what grows during capture, so this is expected to remove the

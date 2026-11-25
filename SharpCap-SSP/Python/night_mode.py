@@ -83,6 +83,13 @@ class NightMode:
                 # Set FlatStyle to Flat for proper color rendering
                 from System.Windows.Forms import FlatStyle
                 control.FlatStyle = FlatStyle.Flat
+            # Special handling for CheckBox - render on the form background
+            elif control_type == 'CheckBox':
+                control.BackColor = self.get_background()
+                control.ForeColor = self.get_foreground()
+                # Set FlatStyle to Flat for proper color rendering
+                from System.Windows.Forms import FlatStyle
+                control.FlatStyle = FlatStyle.Flat
             # Special handling for DataGridView
             elif control_type == 'DataGridView':
                 control.BackgroundColor = self.get_control_background()

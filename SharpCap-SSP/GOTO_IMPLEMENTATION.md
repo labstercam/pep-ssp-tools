@@ -15,7 +15,9 @@ Added telescope GOTO control for SharpCap-SSP to automatically slew the telescop
 - Uses `SharpCap.Mounts.SelectedMount` API for mount control
 - Uses `SharpCap.CoordinateParser.Parse()` for coordinate formatting
 - Blocks until slew completes using `SafeGetAsyncResult()`
-- Waits for mount to settle (up to 30 seconds)
+- Waits for the mount to settle using the SharpCap mount helpers when present
+  (`Slewing`/`IsSlewing` motion monitor then `WaitUntilSettled`), falling back to
+  best-effort `IsSettled` polling for mounts that expose none of them
 
 ### 3. **Manual GOTO Fallback**
 - If no mount control available, offers manual GOTO
@@ -37,6 +39,24 @@ Added telescope GOTO control for SharpCap-SSP to automatically slew the telescop
 - Both GOTO buttons are disabled for the duration of a slew (mutual lock)
 - Disabled until a catalog target is selected (it needs both Comp and Var stars)
 - Left disabled for extinction-star targets (no comparison star available)
+
+### 6. **Plate Solve and Sync After GOTO**
+- A "Plate Solve and Sync" checkbox sits on the "Current Target..." label row,
+  left-aligned with the "GOTO Selected Star" button
+- The target label was narrowed from 800 px to 390 px so the checkbox has its own
+  space on that row; it uses `AutoEllipsis` so the rare over-long target line
+  ends with "..." instead of hard-clipping
+- When ticked, every GOTO (from "GOTO Selected Star" and the two-stage
+  "GOTO Comp"/"GOTO Var" button) runs a SharpCap plate solve + sync after the
+  slew completes and the mount reports settled
+- The tick state is persisted in the config (`plate_solve_sync`, `0`/`1`) and
+  restored on the next launch
+- Skipped silently when the option is off, when the mount does not expose
+  `SolveAndSync`, or when `mount.CanSync` is `False`
+- A solve/sync failure is non-fatal - the GOTO has already succeeded, and the
+  outcome is reported in the status line
+- Because it lives in the shared `_slew_to_star` helper, both GOTO buttons pick
+  up the behaviour automatically
 
 ## Implementation Details
 
@@ -141,9 +161,12 @@ if CancellationToken is None:
 - [x] Mount control works with connected mount
 - [x] Manual GOTO fallback works when no mount
 - [x] Coordinates copied to clipboard correctly
-- [x] Mount settling wait works (up to 30s)
+- [x] Mount settling wait works (`Slewing`/`WaitUntilSettled` then `IsSettled` fallback)
 - [x] Error handling displays meaningful messages
 - [x] No errors in standalone mode
+- [x] "Plate Solve and Sync" checkbox sits left-aligned with "GOTO Selected Star" on the target-label row
+- [x] Checkbox state persists across restarts
+- [x] Tick runs plate solve/sync after each GOTO (both buttons); unticked skips it
 
 ### Test Script
 A comprehensive test suite is available in `test_goto.py` that verifies:
@@ -152,17 +175,21 @@ A comprehensive test suite is available in `test_goto.py` that verifies:
 3. SharpCap detection logic
 4. Button creation conditions
 5. Coordinate formatting
+6. Two-stage GOTO stage toggle/reset logic
+7. Plate Solve and Sync config mapping and gate logic
 
 ## Usage
 
 ### With Mount Control
 1. Select target using "Catalog > Select Target Star"
 2. Choose which star (var/comp/check) from Object dropdown
-3. Click "GOTO Selected Star"
-4. Confirm coordinates in dialog
-5. Telescope slews automatically
-6. Wait for mount to settle
-7. Completion message appears
+3. (Optional) Tick "Plate Solve and Sync" (on the target label row)
+4. Click "GOTO Selected Star"
+5. Confirm coordinates in dialog
+6. Telescope slews automatically
+7. Wait for mount to settle
+8. If "Plate Solve and Sync" is ticked, a plate solve/sync runs automatically
+9. Completion message appears
 
 ### Without Mount Control
 1. Select target using "Catalog > Select Target Star"
@@ -186,7 +213,11 @@ A comprehensive test suite is available in `test_goto.py` that verifies:
 - `SharpCap.Mounts.SelectedMount` - Currently selected mount
 - `mount.StartSlewToAsync(coordinates, token)` - Start async slew
 - `SharpCap.SafeGetAsyncResult(task)` - Wait for async completion
-- `mount.IsSettled` - Check if mount has stopped moving
+- `mount.Slewing` / `mount.IsSlewing` - Whether the mount is still moving (optional)
+- `mount.WaitUntilSettled(bool, token)` - SharpCap settle helper (optional)
+- `mount.IsSettled` - Check if mount has stopped moving (optional)
+- `mount.CanSync` - Whether the mount supports sync (optional)
+- `mount.SolveAndSync()` - Plate solve and sync the mount (returns a task)
 - `SharpCap.CoordinateParser.Parse(string, bool)` - Parse coordinate string
 
 ### Coordinate Formats
@@ -197,12 +228,15 @@ A comprehensive test suite is available in `test_goto.py` that verifies:
 ## Known Limitations
 1. Requires SharpCap 4.0 or later with Mounts API
 2. Mount must be connected and configured in SharpCap
-3. No plate solve/sync after GOTO (could be added if needed)
-4. 30-second timeout for mount settling (configurable)
+3. Plate solve/sync requires the mount to expose `SolveAndSync` and support sync
+   (`CanSync`); otherwise the option is skipped with a status message
+4. Settle detection is best-effort: if a mount exposes no `Slewing`/`IsSlewing`/
+   `WaitUntilSettled`/`IsSettled` state, a fixed 2-second settle wait is used and
+   a "settle state not confirmed" warning is reported rather than failing the GOTO
+5. Motion monitor uses a 300-second cap and the fallback polling a 20-second cap
 
 ## Future Enhancements
-- Optional plate solve and sync after GOTO (like occultation-manager)
-- Configuration option for settling timeout
+- Configuration option for settle/motion timeouts
 - Auto-focus after GOTO
 - Save last GOTO position for quick return
 - Sequence automation (var → comp → check)

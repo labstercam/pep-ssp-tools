@@ -459,12 +459,24 @@ retained, not a steady per-frame leak.
 - `pump_sleep(seconds, slice_seconds=None)` — sleeps in 50 ms slices, pumping between
   them; degrades to a plain `time.sleep` when no callback is registered
 
-Three blocking sites now pump:
+Blocking sites that now pump:
 
 1. `get_slow_count` integration wait — the dominant window (1.15 s per count at 1 s
    integration, up to 10.15 s at 10 s)
 2. `_read_with_timeout` polling loop — a timed-out read blocks for up to 2 s
 3. `_slew_to_star` mount settle loop — up to ~32 s
+4. `_pump_until_complete` — the GOTO mount async waits (`StartSlewToAsync` slew,
+   `WaitUntilSettled`) and, when "Plate Solve and Sync" is ticked, the
+   `mount.SolveAndSync()` solve. Each is pumped in 0.1 s slices instead of a raw
+   `SafeGetAsyncResult`, so no part of the GOTO/solve window blocks the camera's
+   frame queue unpumped. The `SolveAndSync` wait was added with the plate-solve
+   feature - a further multi-second unpumped window otherwise.
+
+   Measured 2026-11-26 (ASI462MM + CGX): the solve wait is async and pollable -
+   `SolveAndSync()` returns in 0.13 s, the pumped wait runs 28.62 s (~20 UI
+   refreshes/s). The solve window measures **+7.6 MB private / +11.3 MB working
+   set over 28.8 s**, reclaimed by the `After SolveAndSync` forced-GC checkpoint -
+   flat, with the screen updating throughout.
 
 `ssp_comm.py` deliberately does **not** import `System.Windows.Forms`. The callback keeps
 the comm layer framework-agnostic and avoids assuming a UI exists.
