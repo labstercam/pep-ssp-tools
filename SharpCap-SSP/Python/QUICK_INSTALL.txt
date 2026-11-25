@@ -172,7 +172,7 @@ For issues, questions, or feature requests:
 VERSION INFORMATION
 ============================================================
 
-SharpCap-SSP Version: 0.1.0
+SharpCap-SSP Version: 0.1.6
 Release Date: January 2026
 Project: pep-ssp-tools
 

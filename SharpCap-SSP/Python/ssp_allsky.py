@@ -5,7 +5,7 @@ Replicates AllSky2,57.bas functionality for wide-field photometry calibration.
 This module determines zero-point constants and residual extinction for 
 all-sky photometry across the entire visible sky.
 
-Version: 1.0.0
+Version: 0.1.6
 Date: January 2026
 Author: pep-ssp-tools project
 
@@ -1610,6 +1610,12 @@ class RawFileDataViewer(Form):
         self.raw_data = raw_data
         self.filename = filename
         
+        # Added for memory test (Phase 2) - cached strikeout Font for the grid.
+        # The per-cell allocation in _populate_grid created one GDI font per
+        # struck-out cell, which on a large raw file is thousands of objects.
+        self._strikeout_font = None
+        self.FormClosed += self._on_form_closed
+        
         self.Text = "Raw File Data - {0}".format(os.path.basename(filename) if filename else "Unknown")
         self.Size = Size(1200, 600)
         self.StartPosition = FormStartPosition.CenterParent
@@ -1617,6 +1623,25 @@ class RawFileDataViewer(Form):
         
         self._setup_ui()
         self._populate_grid()
+    
+    def _get_strikeout_font(self):
+        """Added for memory test (Phase 2) - shared strikethrough Font.
+        
+        Created on first use, after _setup_ui has built self.grid, and released
+        in _on_form_closed.
+        """
+        if self._strikeout_font is None:
+            self._strikeout_font = Font(self.grid.Font, FontStyle.Strikeout)
+        return self._strikeout_font
+    
+    def _on_form_closed(self, sender, event):
+        """Added for memory test (Phase 2) - release the cached strikeout Font."""
+        try:
+            if getattr(self, '_strikeout_font', None) is not None:
+                self._strikeout_font.Dispose()
+                self._strikeout_font = None
+        except Exception:
+            pass
     
     def _setup_ui(self):
         """Set up the UI components."""
@@ -1705,7 +1730,7 @@ class RawFileDataViewer(Form):
                 cell = row.Cells[5 + i]
                 cell.Value = str(cnt) if cnt > 0 else "0"
                 if cnt == 0:
-                    cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                    cell.Style.Font = self._get_strikeout_font()
                     cell.Style.ForeColor = Color.Red
             
             # Final count
@@ -1738,19 +1763,19 @@ class RawFileDataViewer(Form):
                     row.Cells[13].Value = "Not calibration star"
                     # Apply strikethrough to entire row
                     for cell in row.Cells:
-                        cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                        cell.Style.Font = self._get_strikeout_font()
                         cell.Style.ForeColor = Color.Red
                 elif record.get('removed_reason'):
                     row.Cells[13].Value = record['removed_reason']
                     # Apply strikethrough to entire row
                     for cell in row.Cells:
-                        cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                        cell.Style.Font = self._get_strikeout_font()
                         cell.Style.ForeColor = Color.Red
                 else:
                     row.Cells[13].Value = "Not used (see log)"
                     # Apply strikethrough to entire row
                     for cell in row.Cells:
-                        cell.Style.Font = Font(self.grid.Font, FontStyle.Strikeout)
+                        cell.Style.Font = self._get_strikeout_font()
                         cell.Style.ForeColor = Color.Red
 
 

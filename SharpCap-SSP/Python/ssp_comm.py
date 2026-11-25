@@ -6,7 +6,7 @@ Handles serial communication with SSP photometer.
 Implements the SSP-3a/SSP-5a serial protocol.
 
 Author: pep-ssp-tools project
-Version: 0.1.2
+Version: 0.1.6
 """
 
 import clr
@@ -26,6 +26,54 @@ except ImportError:
 from System.Threading import Thread
 from System import TimeSpan, DateTime, Array, Byte
 import time
+
+
+# Added for memory test - UI message pump for long serial waits.
+# The SSP integration wait blocks SharpCap's UI thread for 1.15-10.15 s per
+# count. While the thread is blocked the running camera's frames queue up
+# instead of being released. Registering a pump callback lets those waits keep
+# the host's message pump alive. This module deliberately does not import
+# System.Windows.Forms, so the GUI layer supplies the callback.
+_pump_callback = None
+_pump_slice = 0.05  # seconds between message pumps
+
+# Added for memory test (Phase 2) - upper bound for _clear_buffer's drain loop.
+# The loop is bounded in practice by the device's output, but a
+# continuously-streaming device would otherwise spin here indefinitely.
+_CLEAR_BUFFER_MAX_READS = 1000
+
+
+def set_pump_callback(callback):
+    """Register the callable used to pump UI messages during long waits.
+
+    Added for memory test. Pass Application.DoEvents from the GUI layer, or
+    None to disable pumping (pump_sleep then behaves like time.sleep).
+    """
+    global _pump_callback
+    _pump_callback = callback
+
+
+def pump_sleep(seconds, slice_seconds=None):
+    """Sleep while periodically pumping UI messages.
+
+    Added for memory test. Sleeps in small slices and calls the registered
+    pump callback between slices so the host's message pump keeps running.
+    Falls back to a plain time.sleep when no callback is registered.
+    """
+    if _pump_callback is None:
+        time.sleep(seconds)
+        return
+
+    _slice = _pump_slice if slice_seconds is None else slice_seconds
+    remaining = seconds
+    while remaining > 0:
+        chunk = _slice if remaining > _slice else remaining
+        time.sleep(chunk)
+        remaining -= chunk
+        try:
+            _pump_callback()
+        except Exception:
+            pass
 
 
 class SSPCommunicator:
@@ -332,7 +380,10 @@ class SSPCommunicator:
                 # Fallback for non-standard integration times
                 wait_time = integration_ms * 1.15 / 1000.0
             
-            time.sleep(wait_time)
+            # Added for memory test - pump UI messages during the integration
+            # wait so the running camera's frame queue drains. This is the
+            # dominant blocking window in the SSP capture loop.
+            pump_sleep(wait_time)
             
             # Read response with device-specific timeout
             # Use the same timing mode determined earlier
@@ -652,8 +703,22 @@ class SSPCommunicator:
         start_time = time.time()
         data_parts = []  # Use list instead of string for accumulation
         last_data_time = time.time()
+        # Added for memory test - throttle for UI pumping during the read wait
+        last_pump = start_time
         
         while time.time() - start_time < timeout_seconds:
+            # Added for memory test - keep the UI pump alive while waiting for
+            # the serial response. A timed-out read blocks for up to 2 s, which
+            # is another window where camera frames would otherwise pile up.
+            if _pump_callback is not None:
+                _now = time.time()
+                if (_now - last_pump) >= _pump_slice:
+                    last_pump = _now
+                    try:
+                        _pump_callback()
+                    except Exception:
+                        pass
+            
             # Check if any data is available
             if self.port.BytesToRead > 0:
                 chunk = self.port.ReadExisting()
@@ -697,8 +762,14 @@ class SSPCommunicator:
         return ""
     
     def _clear_buffer(self):
-        """Clear the serial port input buffer."""
+        """Clear the serial port input buffer.
+
+        Added for memory test (Phase 2) - the drain loop is capped so a device
+        that streams continuously cannot keep this spinning.
+        """
         if self.port and self.port.IsOpen:
             # Read and discard any data in buffer
-            while self.port.BytesToRead > 0:
+            _reads = 0
+            while self.port.BytesToRead > 0 and _reads < _CLEAR_BUFFER_MAX_READS:
                 self.port.ReadExisting()
+                _reads += 1

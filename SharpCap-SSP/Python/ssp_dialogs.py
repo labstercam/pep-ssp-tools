@@ -5,7 +5,7 @@ SSP Dialog Windows
 Dialog windows for configuration and data entry.
 
 Author: pep-ssp-tools project
-Version: 0.1.2
+Version: 0.1.6
 """
 
 import clr

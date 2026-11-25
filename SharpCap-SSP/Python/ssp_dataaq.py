@@ -6,7 +6,7 @@ Main data acquisition window for SharpCap-SSP.
 Replicates SSPDataq3 functionality.
 
 Author: pep-ssp-tools project
-Version: 0.1.2
+Version: 0.1.6
 """
 
 import clr
@@ -35,6 +35,19 @@ from System.Windows.Forms import *
 from System.Drawing import *
 from System.IO import Path
 
+# Added for memory test - memory instrumentation imports
+from System.Diagnostics import Process
+try:
+    import ctypes  # Added for memory test - optional GDI/USER handle counts
+except Exception:
+    ctypes = None
+
+# Added for memory test - baseline captured when SSP module first loads
+try:
+    _MEM_BASELINE_BYTES = Process.GetCurrentProcess().WorkingSet64
+except Exception:
+    _MEM_BASELINE_BYTES = 0
+
 # Import SSP modules
 import ssp_config
 import ssp_comm
@@ -62,6 +75,17 @@ class SSPDataAcquisitionWindow(Form):
             device_type=self.config.get('device_type', 'auto'),
             config=self.config
         )
+        
+        # Added for memory test - let ssp_comm pump UI messages during long
+        # serial waits. Without this the integration wait and the mount settle
+        # loop block SharpCap's UI thread while the camera keeps running, so
+        # frames queue up faster than they are released.
+        try:
+            # Wrapped in a lambda: a bare .NET static method reference is not
+            # reliably callable across IronPython versions.
+            ssp_comm.set_pump_callback(lambda: Application.DoEvents())
+        except Exception:
+            pass
         
         # Initialize night mode
         self.night_mode = night_mode.NightMode()
@@ -109,6 +133,30 @@ class SSPDataAcquisitionWindow(Form):
         self.data_saved_count = 0  # Track how many entries have been saved to file
         self.data_notes = {}  # Dictionary to store notes: {data_line: note}
         
+        # Added for memory test - set while the window is closing. The capture
+        # loop now pumps UI messages during long waits, so a close can land in
+        # the middle of a read; this lets the loop stop before it touches
+        # controls that are being disposed.
+        self._closing = False
+        # Added for memory test - re-entrancy guard for trial mode, which runs
+        # without disabling the START button
+        self._trial_busy = False
+        # Added for memory test (Phase 2) - cached bold Font for the target
+        # label, created on first use and disposed in _on_form_closed
+        self._target_label_font = None
+        # Added for memory test - per-instance memory tracking state
+        self._mem_last = _MEM_BASELINE_BYTES
+        self._mem_reading_count = 0
+        self._mem_last_point = _MEM_BASELINE_BYTES  # Added for memory test - checkpoint baseline
+        # Added for memory test - time-normalised leak rate tracking
+        # _mem_last_* is shared by _log_memory_point checkpoints; the _mem_last_reading_*
+        # set is dedicated to _print_memory_stats so an interleaved checkpoint cannot
+        # shorten the interval used for the per-reading rate.
+        self._mem_last_private = _MEM_BASELINE_BYTES
+        self._mem_last_ts = DateTime.Now
+        self._mem_last_reading_private = _MEM_BASELINE_BYTES
+        self._mem_last_reading_ts = DateTime.Now
+        
         # Setup window
         self.Text = "SSP Data Acquisition Program Version 3"
         self.Width = 1100
@@ -123,6 +171,9 @@ class SSPDataAcquisitionWindow(Form):
         
         # Add closing event handler to disconnect COM port
         self.FormClosing += self._on_form_closing
+        # Added for memory test (Phase 2) - release the cached target-label font
+        # once the form is fully closed (its controls no longer reference it)
+        self.FormClosed += self._on_form_closed
         
         # Setup UI (must be done before starting timer)
         self._setup_menu()
@@ -1017,6 +1068,9 @@ class SSPDataAcquisitionWindow(Form):
     
     def _on_form_closing(self, sender, event):
         """Handle form closing event - disconnect COM port and cleanup timer."""
+        # Added for memory test - signal any in-progress acquisition to stop
+        self._closing = True
+        
         if self.comm.is_connected:
             success, message = self.comm.disconnect()
             self._update_status(message)
@@ -1025,6 +1079,20 @@ class SSPDataAcquisitionWindow(Form):
         if hasattr(self, 'time_timer'):
             self.time_timer.Stop()
             self.time_timer.Dispose()
+    
+    def _on_form_closed(self, sender, event):
+        """Added for memory test (Phase 2) - release the cached target-label font.
+        
+        Disposed here rather than in _on_form_closing because the label is still
+        live at FormClosing, and Control.Dispose() does not dispose a Font that
+        was assigned to it. Once FormClosed has fired, nothing references it.
+        """
+        try:
+            if getattr(self, '_target_label_font', None) is not None:
+                self._target_label_font.Dispose()
+                self._target_label_font = None
+        except Exception:
+            pass
     
     def _on_select_com_port(self, sender, event):
         """Handle Select SSP COM Port menu item."""
@@ -1456,6 +1524,134 @@ class SSPDataAcquisitionWindow(Form):
         
         print("="*60 + "\n")
     
+    # Added for memory test - print memory usage after each SSP reading
+    def _print_memory_stats(self, reading_num):
+        """Added for memory test - print memory usage after each SSP reading."""
+        _proc = None
+        try:
+            _proc = Process.GetCurrentProcess()
+            _proc.Refresh()
+            _now = _proc.WorkingSet64
+            _private = _proc.PrivateMemorySize64
+            _ts = DateTime.Now.ToString("HH:mm:ss.fff")
+            _delta_last = _now - self._mem_last
+            _delta_start = _now - _MEM_BASELINE_BYTES
+            _mb = 1048576.0
+            # Added for memory test - time-normalised leak rate (key diagnostic).
+            # Uses the reading-dedicated baseline so an interleaved _log_memory_point
+            # checkpoint cannot shorten the interval while _delta_last spans the whole
+            # reading-to-reading gap.
+            _elapsed_sec = (DateTime.Now - self._mem_last_reading_ts).TotalSeconds
+            if _elapsed_sec < 0.001:
+                _elapsed_sec = 0.001
+            _rate_ws = (_delta_last / _mb) / _elapsed_sec
+            _rate_pb = ((_private - self._mem_last_reading_private) / _mb) / _elapsed_sec
+            print("=== MEMORY TEST [%s] Reading #%d ===" % (_ts, reading_num))
+            print("  Current working set : %.2f MB" % (_now / _mb))
+            print("  Change since last   : %+.2f MB" % (_delta_last / _mb))
+            print("  Change since start  : %+.2f MB" % (_delta_start / _mb))
+            print("  Private bytes       : %.2f MB" % (_private / _mb))
+            print("  Peak working set    : %.2f MB" % (_proc.PeakWorkingSet64 / _mb))
+            print("  Handle count        : %d" % _proc.HandleCount)
+            print("  Thread count        : %d" % _proc.Threads.Count)
+            print("  Managed heap (GC)   : %.2f MB" % (System.GC.GetTotalMemory(False) / _mb))
+            print("  saved_data rows     : %d" % len(self.saved_data))
+            print("  ListBox items       : %d" % self.data_listbox.Items.Count)
+            print("  Elapsed since last  : %.1f s" % _elapsed_sec)
+            print("  WS rate             : %+.3f MB/s" % _rate_ws)
+            print("  Private rate        : %+.3f MB/s" % _rate_pb)
+            # Added for memory test - optional GDI/USER handle counts via ctypes
+            if ctypes is not None:
+                try:
+                    _h = _proc.Handle.ToInt32()
+                    _gdi = ctypes.windll.user32.GetGuiResources(_h, 0)
+                    _user = ctypes.windll.user32.GetGuiResources(_h, 1)
+                    print("  GDI handles         : %d" % _gdi)
+                    print("  USER handles        : %d" % _user)
+                except Exception:
+                    pass
+            self._mem_last = _now
+            self._mem_last_private = _private
+            self._mem_last_ts = DateTime.Now
+            self._mem_last_reading_private = _private
+            self._mem_last_reading_ts = DateTime.Now
+        except Exception as e:
+            print("Memory test error: %s" % str(e))
+        finally:
+            # Added for memory test - release the Process handle so the
+            # instrumentation does not itself inflate the handle count.
+            if _proc is not None:
+                try:
+                    _proc.Dispose()
+                except Exception:
+                    pass
+
+    # Added for memory test - checkpoint logger for GOTO and dialog paths
+    def _log_memory_point(self, label, force_gc=False):
+        """Added for memory test - log memory at a named checkpoint."""
+        _proc = None
+        try:
+            _proc = Process.GetCurrentProcess()
+            _proc.Refresh()
+            _mb = 1048576.0
+            _ts = DateTime.Now.ToString("HH:mm:ss.fff")
+            _now = _proc.WorkingSet64
+            _private = _proc.PrivateMemorySize64
+            _delta_start = _now - _MEM_BASELINE_BYTES
+            _delta_point = _now - self._mem_last_point
+            _gc_now = System.GC.GetTotalMemory(False)
+            # Added for memory test - time-normalised rate between checkpoints
+            _elapsed_sec = (DateTime.Now - self._mem_last_ts).TotalSeconds
+            if _elapsed_sec < 0.001:
+                _elapsed_sec = 0.001
+            _rate_ws = (_delta_point / _mb) / _elapsed_sec
+            _rate_pb = ((_private - self._mem_last_private) / _mb) / _elapsed_sec
+            print("=== MEMORY POINT [%s] %s ===" % (_ts, label))
+            print("  Current working set : %.2f MB" % (_now / _mb))
+            print("  Change since last point : %+.2f MB" % (_delta_point / _mb))
+            print("  Change since start  : %+.2f MB" % (_delta_start / _mb))
+            print("  Private bytes       : %.2f MB" % (_private / _mb))
+            print("  Handle count        : %d" % _proc.HandleCount)
+            print("  Thread count        : %d" % _proc.Threads.Count)
+            print("  Managed heap (GC)   : %.2f MB" % (_gc_now / _mb))
+            print("  Elapsed since last point : %.1f s" % _elapsed_sec)
+            print("  WS rate             : %+.3f MB/s" % _rate_ws)
+            print("  Private rate        : %+.3f MB/s" % _rate_pb)
+            if force_gc:
+                # Added for memory test - forced GC variant
+                System.GC.Collect()
+                System.GC.WaitForPendingFinalizers()
+                System.GC.Collect()
+                _gc_forced = System.GC.GetTotalMemory(True)
+                _proc.Refresh()
+                _now = _proc.WorkingSet64
+                _private = _proc.PrivateMemorySize64
+                print("  Managed heap (forced GC) : %.2f MB" % (_gc_forced / _mb))
+                print("  Working set after forced GC : %.2f MB" % (_now / _mb))
+                print("  Private bytes after forced GC : %.2f MB" % (_private / _mb))
+            if ctypes is not None:
+                try:
+                    _h = _proc.Handle.ToInt32()
+                    _gdi = ctypes.windll.user32.GetGuiResources(_h, 0)
+                    _user = ctypes.windll.user32.GetGuiResources(_h, 1)
+                    print("  GDI handles         : %d" % _gdi)
+                    print("  USER handles        : %d" % _user)
+                except Exception:
+                    pass
+            self._mem_last_point = _now
+            self._mem_last_private = _private
+            self._mem_last_ts = DateTime.Now
+        except Exception as e:
+            print("Memory point error: %s" % str(e))
+        finally:
+            # Added for memory test - release the Process handle so the
+            # instrumentation does not itself inflate the handle count.
+            if _proc is not None:
+                try:
+                    _proc.Dispose()
+                except Exception:
+                    pass
+
     def _on_start(self, sender, event):
         """Handle START button click.
         
@@ -1561,6 +1757,10 @@ class SSPDataAcquisitionWindow(Form):
             binning = 2  # Sum pairs of counts for 6 or 8 intervals
 
         for i in range(interval_val):
+            # Added for memory test - stop if the window started closing while
+            # the integration wait was pumping messages
+            if self._closing:
+                break
             success, count_str, error_msg = self.comm.get_slow_count(integ_ms)
             
             if success:
@@ -1577,6 +1777,13 @@ class SSPDataAcquisitionWindow(Form):
                 else:
                     self._update_status("Failed to get count after retry")
                     counts.append("00000")  # Insert zero on failure
+        
+        # Added for memory test - if the window is closing, stop before any
+        # further control access or data formatting. The binning step below
+        # indexes pairs, which a mid-loop break would not have produced.
+        if self._closing:
+            return
+        
         # Special treatement when  of 6 or 8 is chosen.
         # Sum pairs of counts to reduce to 3 or 4 readings, respectively so that it conforms to the standard output
         # This enables, say, 5s integrations for bright stars instead of 10s to avoid saturation
@@ -1619,6 +1826,10 @@ class SSPDataAcquisitionWindow(Form):
         self.data_listbox.Items.Insert(0, data_line)
         
         self._update_status("Data collection complete - " + str(len(counts)) + " readings." + (" Binned: " + str(binning == 2) if binning == 2 else ""))
+        
+        # Added for memory test - print memory stats after each completed reading
+        self._mem_reading_count += 1
+        self._print_memory_stats(self._mem_reading_count)
     
     def _do_trial_mode(self, filter_val, gain_val, integ_ms):
         """Execute trial mode (single test reading).
@@ -1628,34 +1839,45 @@ class SSPDataAcquisitionWindow(Form):
             gain_val: Gain value
             integ_ms: Integration time in milliseconds
         """
-        # Set integration time
-        success, msg = self.comm.set_integration(integ_ms)
-        if not success:
-            self._update_status("Error setting integration time: " + msg)
+        # Added for memory test - bail out if the window is closing (the pumped
+        # read below must not touch controls being disposed), or if a previous
+        # trial run is still in progress. Trial mode is reached from _on_start
+        # before the START button is disabled, so a click delivered by the pump
+        # could otherwise nest a second serial transaction on the same port.
+        if self._closing or self._trial_busy:
             return
-        
-        # Set gain
-        success, msg = self.comm.set_gain(gain_val)
-        if not success:
-            self._update_status("Error setting gain: " + msg)
-            return
-        
-        self._update_status("Trial mode: Getting single count...")
-        
-        success, count_str, error_msg = self.comm.get_slow_count(integ_ms)
-        
-        if success:
-            msg = "TRIAL COUNT\n\n"
-            msg += "Filter: " + filter_val + "\n"
-            msg += "Gain: " + str(gain_val) + "\n"
-            msg += "Integration: " + str(integ_ms/1000.0) + " sec\n"
-            msg += "Count: " + count_str + "\n"
-            MessageBox.Show(msg, "Trial Mode Result", MessageBoxButtons.OK, MessageBoxIcon.Information)
-            self._update_status("Trial count: " + count_str)
-        else:
-            MessageBox.Show("Error: " + error_msg, "Trial Mode Failed",
-                          MessageBoxButtons.OK, MessageBoxIcon.Error)
-            self._update_status("Trial mode failed: " + error_msg)
+        self._trial_busy = True
+        try:
+            # Set integration time
+            success, msg = self.comm.set_integration(integ_ms)
+            if not success:
+                self._update_status("Error setting integration time: " + msg)
+                return
+            
+            # Set gain
+            success, msg = self.comm.set_gain(gain_val)
+            if not success:
+                self._update_status("Error setting gain: " + msg)
+                return
+            
+            self._update_status("Trial mode: Getting single count...")
+            
+            success, count_str, error_msg = self.comm.get_slow_count(integ_ms)
+            
+            if success:
+                msg = "TRIAL COUNT\n\n"
+                msg += "Filter: " + filter_val + "\n"
+                msg += "Gain: " + str(gain_val) + "\n"
+                msg += "Integration: " + str(integ_ms/1000.0) + " sec\n"
+                msg += "Count: " + count_str + "\n"
+                MessageBox.Show(msg, "Trial Mode Result", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                self._update_status("Trial count: " + count_str)
+            else:
+                MessageBox.Show("Error: " + error_msg, "Trial Mode Failed",
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+                self._update_status("Trial mode failed: " + error_msg)
+        finally:
+            self._trial_busy = False
     
     def _format_data_line(self, ut_date, ut_time, catalog, object_name, filter_char, counts, integ, gain):
         """Format data line for display and file output.
@@ -1815,6 +2037,16 @@ class SSPDataAcquisitionWindow(Form):
             MessageBox.Show("Failed to reload catalogs.\nCheck that CSV files are in the Python folder.",
                           "Catalog Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
     
+    # Added for memory test (Phase 2) - one cached bold Font for the target
+    # label. Label.Font does not own the font assigned to it, so the
+    # per-selection allocation in _on_select_star and
+    # _on_select_extinction_star leaked a Font and its GDI handle on every star.
+    def _get_target_label_bold_font(self):
+        """Return the shared bold Font used for current_target_label."""
+        if self._target_label_font is None:
+            self._target_label_font = Font("Arial", 9, FontStyle.Bold)
+        return self._target_label_font
+    
     def _on_select_star(self, sender, event):
         """Handle select star menu click."""
         if not self.catalog or self.catalog.get_count() == 0:
@@ -1822,10 +2054,14 @@ class SSPDataAcquisitionWindow(Form):
                           "No Catalog", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             return
         
+        # Added for memory test - checkpoint before dialog opens
+        self._log_memory_point("Before StarSelectionDialog")
         # Create star selection dialog
         dialog = StarSelectionDialog(self.catalog, self.config)
         self.night_mode.apply_to_form(dialog)
         result = dialog.ShowDialog(self)
+        # Added for memory test - checkpoint after dialog returns (dialog still referenced)
+        self._log_memory_point("After StarSelectionDialog", force_gc=True)
         
         if result == DialogResult.OK and dialog.selected_target:
             target = dialog.selected_target
@@ -1875,7 +2111,8 @@ class SSPDataAcquisitionWindow(Form):
                 target.comparison.name,
                 target.check.name)
             self.current_target_label.ForeColor = Color.DarkGreen
-            self.current_target_label.Font = Font("Arial", 9, FontStyle.Bold)
+            # Added for memory test (Phase 2) - reuse the cached font
+            self.current_target_label.Font = self._get_target_label_bold_font()
             
             # Prepare display names and actual names
             var_display = target.variable.name
@@ -2022,7 +2259,11 @@ class SSPDataAcquisitionWindow(Form):
         # Update button highlights after night mode is applied
         if hasattr(dialog, '_update_button_highlights'):
             dialog._update_button_highlights()
+        # Added for memory test - checkpoint before dialog opens
+        self._log_memory_point("Before ExtinctionStarSelectionDialog")
         result = dialog.ShowDialog(self)
+        # Added for memory test - checkpoint after dialog returns (dialog still referenced)
+        self._log_memory_point("After ExtinctionStarSelectionDialog", force_gc=True)
         
         if result == DialogResult.OK and dialog.selected_star:
             star = dialog.selected_star
@@ -2079,7 +2320,8 @@ class SSPDataAcquisitionWindow(Form):
             self.current_target_label.Text = "Current Target (Extinction): %s (V=%.2f, %s)" % (
                 star.name, star.v_mag, airmass_str)
             self.current_target_label.ForeColor = Color.DarkBlue
-            self.current_target_label.Font = Font("Arial", 9, FontStyle.Bold)
+            # Added for memory test (Phase 2) - reuse the cached font
+            self.current_target_label.Font = self._get_target_label_bold_font()
             
             # Clean up previously selected target stars (including comp/check)
             # Remove all items except the base ones (New Object, SKY, SKYNEXT, SKYLAST, CATALOG)
@@ -2226,16 +2468,25 @@ class SSPDataAcquisitionWindow(Form):
                 
                 print("Starting GOTO to: RA %.6fh, Dec %.6f°" % (ra_hours, dec_degrees))
                 
+                # Added for memory test - checkpoint before slew starts
+                self._log_memory_point("Before StartSlewToAsync")
                 # Use SafeGetAsyncResult to properly wait for slew completion
                 self.SharpCap.SafeGetAsyncResult(mount.StartSlewToAsync(coordinates, CancellationToken()))
+                # Added for memory test - checkpoint after SafeGetAsyncResult returns
+                self._log_memory_point("After SafeGetAsyncResult")
                 
                 # Wait for mount to settle
-                time.sleep(2)
+                # Added for memory test - pump UI messages while waiting so the
+                # running camera's frame queue drains instead of accumulating.
+                # This is the longest single blocking window (up to ~32 s).
+                ssp_comm.pump_sleep(2)
                 if not mount.IsSettled:
                     print("Waiting for mount to settle...")
                     wait_start = time.time()
                     while not mount.IsSettled and (time.time() - wait_start) < 30:
-                        time.sleep(1)
+                        ssp_comm.pump_sleep(1)
+                # Added for memory test - checkpoint after settle loop
+                self._log_memory_point("After settle loop", force_gc=True)
                 
                 print("GOTO completed: RA %.4fh, Dec %.4f°" % (ra_hours, dec_degrees))
                 self._update_status("GOTO completed to %s: %s" % (star_type, star.name))

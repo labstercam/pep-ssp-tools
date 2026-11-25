@@ -3,6 +3,11 @@
 ## Date: January 10, 2026
 ## Verification: Complete review of SharpCap-SSP implementation against original SSPDataq
 
+> **Latest additions are at the end of this file.** Sections 6-9 (November 25, 2026) cover the
+> memory leak / `OutOfMemoryException` fix — see *Memory Leak / OutOfMemoryException During
+> Long Acquisition* near the bottom. The earlier sections are kept as written and refer to the
+> code as it was at the time.
+
 ---
 
 ## Critical Bugs Found and Fixed
@@ -417,3 +422,220 @@ self.data_listbox.Items.Insert(0, data_line)  # Reverse for display
 **Testing Status:** Requires physical SSP photometer for final verification.
 
 **Production Ready:** YES - for slow mode photometry with manual filter changes. Full-featured UI with notes, headers, and proper file handling.
+
+---
+
+## Memory Leak / OutOfMemoryException During Long Acquisition (November 25, 2026)
+
+### 6. **UI Thread Blocking Caused Memory Growth When a Camera Was Running** ⚠️ CRITICAL
+
+**Symptom:** `OutOfMemoryException`, or a hard crash and restart, after roughly 100 star
+readings. Memory climbed steadily through the session and never came back down until
+SharpCap was closed.
+
+**Diagnosis (measured, not inferred).** The SSP capture loop runs on SharpCap's UI thread
+and blocked it with `time.sleep()` during the SSP integration wait and the mount settle
+loop. While the thread was blocked, a running camera's frames queued in SharpCap instead
+of being released. Controlled 7-minute runs isolated it precisely:
+
+| Condition | Private-bytes rate |
+|---|---|
+| SharpCap alone, no camera | -0.021 MB/s (flat) |
+| SharpCap + camera live at 1 s, not capturing | -0.051 MB/s (flat) |
+| SharpCap + SSP interface open, not connected | +0.000 MB/s (flat) |
+| SharpCap + **SSP capturing**, no camera | -0.099 MB/s (flat) |
+| SharpCap + **SSP capturing + camera live** | **+0.56 to +0.89 MB/s (leak)** |
+| SharpCap + **SSP capturing + camera + GOTO** | **+2.62 MB/s (leak, worst case)** |
+
+The leak required **both** the SSP capture loop *and* a running camera. Neither alone
+leaked, and the camera pipeline was explicitly exonerated (a live 1920x1080 camera for
+7 minutes *reduced* memory by 21 MB). Growth was bursty rather than monotonic, with
+genuinely negative intervals — the signature of queued frames being delivered and then
+retained, not a steady per-frame leak.
+
+**Fix.** A message-pump helper in `ssp_comm.py`:
+
+- `set_pump_callback(callback)` — the GUI layer registers `Application.DoEvents`
+- `pump_sleep(seconds, slice_seconds=None)` — sleeps in 50 ms slices, pumping between
+  them; degrades to a plain `time.sleep` when no callback is registered
+
+Three blocking sites now pump:
+
+1. `get_slow_count` integration wait — the dominant window (1.15 s per count at 1 s
+   integration, up to 10.15 s at 10 s)
+2. `_read_with_timeout` polling loop — a timed-out read blocks for up to 2 s
+3. `_slew_to_star` mount settle loop — up to ~32 s
+
+`ssp_comm.py` deliberately does **not** import `System.Windows.Forms`. The callback keeps
+the comm layer framework-agnostic and avoids assuming a UI exists.
+
+**Result, same 1 s capture condition:**
+
+| | Before | After |
+|---|---|---|
+| Private-bytes rate | +0.558 MB/s | **+0.012 MB/s** steady state |
+| Handle trend | +85 over 300 s | **-56 over 420 s** |
+| Projected growth, 100-star session | ~14.9 GB (fatal on 8 GB) | **under 0.5 GB** |
+
+**Validated over a full-length session (99 minutes).** A soak with the camera running, mount
+slews and plate solving measured **+6.64 MB total over 99.1 minutes (+0.001 MB/s)**, using
+two independent instruments - the external sampler and SharpCap's own 30-minute memory
+watchdog. Critically, **SharpCap's camera frame pool and VirtualAlloc allocation were
+byte-identical at every checkpoint**: 3 pooled buffers of 4,243,712 bytes (12.141 MB), plus
+2 x 2,121,856 (4.047 MB) and 2 x 4,243,712 (8.094 MB) unpooled, with VirtualAlloc constant
+at 36.42 MB.
+
+That is the specific quantity that would grow if frames were queuing, so the fix is
+confirmed at the mechanism level, not merely at the "memory looks flat" level. Memory
+oscillated rather than drifting: 55 positive intervals summing +473 MB against 44 negative
+intervals summing -467 MB. See `MEMORY_ANALYSIS.md` Part 11.
+
+**Deliberately left blocking:** the two 2 s retry pauses in the filter homing and filter
+selection loops. They run *before* the START button is disabled, so pumping there would
+open a re-entrancy window. They are error-path retries, not steady state.
+
+### 7. **Closing the Window Mid-Acquisition Could Touch Disposed Controls**
+
+**Cause:** The pump above widened the window in which the window can be closed during a
+read. `_on_form_closing` had no in-progress guard, so the count loop continued after the
+COM port disconnected and called `_update_status` on controls already being disposed.
+
+**Fix:** A `_closing` flag, set as the first statement of `_on_form_closing`. The count
+loop checks it before each `get_slow_count`, and `_on_start` returns before the binning
+step — which indexes `counts` in pairs and would raise `IndexError` on the short list a
+mid-loop break leaves behind. `_do_trial_mode` also bails out early.
+
+
+### 8. **Trial Mode Could Re-Enter Itself**
+
+**Cause:** Trial mode is reached from `_on_start` *before* the START button is disabled,
+and does not disable it itself. The pumped integration wait could deliver a START click
+while a trial run was still in progress, nesting a second serial transaction on the same
+port.
+
+**Fix:** A `_trial_busy` flag, checked at the top of `_do_trial_mode`, set before any
+serial work, and cleared in a `finally` so an exception cannot leave trial mode blocked
+permanently.
+
+### 9. **`_dock_timer` Was Never Stopped on Close**
+
+**Cause:** `ssp_docking.py` creates a 200 ms timer and starts it on load. The base class's
+`FormClosing` handler disposes `time_timer` but knew nothing about `_dock_timer`, so the
+timer kept running after close and kept the window, its controls and its event
+subscriptions alive.
+
+**Fix:** `DockedDataAcquisitionWindow` overrides `_on_form_closing`, stops and disposes
+`_dock_timer`, then calls `super()._on_form_closing(...)`. This relies on Python's dynamic
+lookup: the base subscribes `self._on_form_closing` during `super().__init__`, and because
+`self` is a `DockedDataAcquisitionWindow` the *override* is what gets bound — the base
+cleanup still runs, exactly once, with no recursion.
+
+### 10. **Phase 2 Hygiene Items - Font Caches, Icon File Handle, Buffer Loop**
+
+Four deferred hygiene items were fixed in a second pass. None of them caused the crash; they
+were left in place deliberately while the real mechanism was being located.
+
+#### 10.1 Per-selection `Font` for the target label (`ssp_dataaq.py`)
+
+Every target selection allocated `Font("Arial", 9, FontStyle.Bold)` and assigned it to
+`current_target_label.Font`. `Label.Font` does not take ownership of the font assigned to it,
+so the replaced font was never disposed - one GDI font leaked per star.
+
+`_get_target_label_bold_font()` now creates it once and returns the same instance. It is
+disposed in a new `_on_form_closed` handler rather than in `_on_form_closing`, because at
+`FormClosing` the label is still alive and a repaint with a disposed font would throw.
+
+#### 10.2 Per-cell strikeout `Font` (`ssp_allsky.py`)
+
+`RawFileDataViewer._populate_grid()` allocated a strikethrough `Font` for every struck-out
+cell, including inside two `for cell in row.Cells` loops - thousands of GDI fonts in a single
+pass over a large raw file. All four sites now share a lazily created `_get_strikeout_font()`,
+disposed in `FormClosed` with the same pattern as 10.1.
+
+#### 10.3 `Image.FromFile` held `SSP.ico` open for the whole session (`main.py`)
+
+`Image.FromFile` keeps the file handle open for as long as the `Image` lives, and SharpCap
+retains the image for the toolbar button - so `SSP.ico` stayed locked until SharpCap exited.
+A lock test against the running application confirmed it, and confirmed that nothing else in
+the folder was locked:
+
+```
+SSP.ico            LOCKED
+ssp_config.json    NOT locked
+ssp_dataaq.py      NOT locked
+dparms.txt         NOT locked
+```
+
+Because the image is retained, disposing it directly would have broken the toolbar icon. The
+icon is instead built from memory:
+
+```python
+_ssp_icon_stream = MemoryStream(System.IO.File.ReadAllBytes(icon_path))
+_ssp_icon_image = Image.FromStream(_ssp_icon_stream)
+SharpCap.AddCustomButton("PEP", _ssp_icon_image, "SSP Photometer Control", launch_ssp_photometer)
+```
+
+`ReadAllBytes` closes the file immediately, and both objects are held in module-level
+references so neither can be collected (GDI+ requires the source stream to outlive the image).
+Measured against real `System.Drawing` using two independent copies of the icon:
+`Image.FromFile` holds the file open while the new path does not, and the resulting image is
+identical - 32x32, `Format32bppArgb`, 0 differing pixels across every channel including alpha.
+A `Bitmap` copy was rejected because it can alter icon alpha.
+
+#### 10.4 `_clear_buffer` had no iteration cap (`ssp_comm.py`)
+
+The drain loop is now capped at `_CLEAR_BUFFER_MAX_READS = 1000` reads, so a
+continuously-streaming device cannot keep it spinning indefinitely.
+
+#### Verification
+
+- Reproducible checks live in `tools/`: `verify_phase2_hygiene.py` (buffer cap and both Font
+  caches, extracted from the shipped source with `ast` and run against fakes) and
+  `verify_icon_handle.ps1` (file-handle behaviour and pixel identity against real
+  `System.Drawing`). Both exit non-zero on failure.
+- `py_compile` clean on all four modules.
+- `pyflakes` on all 13 modules before and after: **32 non-noise messages in both**, with
+  identical message sets once line numbers are normalised - no new warnings.
+- `_clear_buffer` extracted from the shipped source with `ast` and exercised against a fake
+  port: finite buffers drain fully, a 10**9-byte runaway stream stops at exactly 1000 reads,
+  and a closed port or `port=None` is a no-op.
+- The shipped cache helpers were extracted the same way and run with a fake `Font`: 1
+  allocation for 501 calls and 1 for 5001 calls, always the same instance; `_on_form_closed`
+  disposes it, clears the reference, is idempotent and tolerates an absent attribute.
+- Deployed copies synced and SHA256-matched (`*.prephase2b.bak` retained in the deploy folder).
+
+### Verification Performed
+
+- `py_compile` clean on `ssp_dataaq.py`, `ssp_comm.py`, `ssp_docking.py`.
+- `pyflakes` run on all three, before and after the changes: **21 non-noise messages in
+  both, with identical message sets** — no new warnings introduced. (The 492 remaining
+  messages are the known star-import false positives described under *Import Verification*
+  above.)
+- `pump_sleep` extracted from the source AST and exercised directly: no-callback fallback,
+  timing accuracy, pump count, exception isolation, zero duration, custom slice size. All
+  passed.
+- `_do_trial_mode` guard structure verified via AST: set before `try`, cleared only in
+  `finally`, both flags initialised in `__init__`.
+- Docking override dispatch semantics verified with a standalone subclassing test.
+
+### Known Residual - re-checked and cleared
+
+A mild kernel-handle drift was observed during short readings: +32 handles over 5 minutes,
+with GDI and USER flat. It did **not** reproduce over the 99-minute soak, where the handle
+count moved **-5** end to end (1610 -> 1605). The earlier observation is therefore treated
+as noise rather than a residual leak. It was never the GDI/USER dialog leak from section 1;
+those are separate and still deferred.
+
+### Still Deferred (assessed as hygiene, not required for the crash)
+
+- 8 undisposed `ShowDialog()` sites (~54 MB + handles per 100 stars)
+- Full re-entrancy guard on `_on_start` (needs a ~170-line `try/finally`; the button-disable
+  already blocks re-entry during the loop)
+
+The other hygiene items formerly listed here - the per-star `Font`, the per-cell strikeout
+`Font`, the `Image.FromFile` handle and the `_clear_buffer` iteration cap - were fixed in
+section 10 above.
+
+See `MEMORY_ANALYSIS.md` for the complete measurement record, including the control
+experiments, the burstiness analysis and the caveats.
+

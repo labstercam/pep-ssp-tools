@@ -6,11 +6,11 @@ SharpCap-SSP is a Python-based tool for integrating Optec SSP photometers with S
 
 ## 📥 Quick Download
 
-**Latest Release: v0.1.5**
+**Latest Release: v0.1.6**
 
-https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.5 
+https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.6 
 
-### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.5.zip)
+### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.6.zip)
 
 *Non-experts: Just download the ZIP, extract it, and follow the `QUICK_INSTALL.txt` file inside.*
 
@@ -20,7 +20,7 @@ https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.5
 
 This tool replicates the core data collection functionality of the original SSPDataq software, enabling serial communication and photometer control directly within the SharpCap environment or standalone.
 
-## Status: Version 0.1.5 - Dockable SSP Data Acquisition Window
+## Status: Version 0.1.6 - Memory Leak Fix for Long Sessions
 
 ✅ **Serial communication implemented and tested**
 ✅ **Data collection working (slow mode + trial mode)**
@@ -86,6 +86,13 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 - ✅ Night mode (red screen for dark adaptation) with button highlighting
 - ✅ Interactive test script (ssp_quick_test.py)
 - ✅ Automated test suite (ssp_test_serial.py)
+- ✅ **Memory leak fix for long sessions with a guide camera** ⭐
+  - Fixed `OutOfMemoryException` / crash after ~100 readings when a camera was running
+  - SSP waits now **pump the UI message loop** instead of blocking it, so camera frames
+    are released rather than queued
+  - **Measured** over a 99-minute soak: **+6.6 MB total**, versus ~15.6 GB projected at the
+    old rate. SharpCap's own camera frame pool was byte-identical throughout
+  - See `BUG_FIXES.md` section 6 and `MEMORY_ANALYSIS.md` for the measurements
 - ✅ **Memory optimizations for extended sessions**
   - Optimized string handling reduces temporary allocations by ~80%
   - Timer resource cleanup prevents memory leaks
@@ -298,12 +305,15 @@ python ssp_test_serial.py [COM_PORT]
 **See [Python/TEST_README.md](Python/TEST_README.md) for complete testing documentation.**
 
 ## Usage
-2. Launch SharpCap and load SharpCap-SSP script
-3. Select COM port in configuration panel
-4. Click "Connect" to establish communication with photometer
-5. Configure observation parameters (filter, gain, integration time)
-6. Click "Acquire" to collect photometric data
-7. Data is saved in .raw format compatible with SSPDataq reduction tools
+
+See **Basic Usage** under Quick Start above for the normal workflow. In brief:
+
+1. Launch SharpCap, or `main.py` standalone
+2. Open the SSP Data Acquisition window from the **PEP** button
+3. **Setup → Select SSP COM Port**, then **Setup → Connect to SSP**
+4. Select filter, gain, integration time, interval and mode
+5. Click **START** to collect data
+6. **File → Save Data** to export a `.raw` file (and `.tab`)
 
 ## Data Format
 
@@ -319,26 +329,47 @@ MO-DY-YEAR    UT    CAT  OBJECT         F  ----------COUNTS---------- INT SCLE C
 
 ```
 SharpCap-SSP/
-├── README.md          - This file
+├── README.md              - This file
+├── BUG_FIXES.md           - Bug fix and code verification record
+├── DEVELOPMENT_NOTES.md   - Developer notes, patterns and threading rules
+├── MEMORY_ANALYSIS.md     - Memory / OutOfMemoryException investigation record
+├── DOCKING.md             - Docked-window implementation guide
+├── RELEASE_INSTRUCTIONS.md
+├── create_release_zip.ps1
+├── tools/
+│   └── monitor_sharpcap.ps1   - External SharpCap memory sampler (diagnostics)
 └── Python/
-    ├── main.py        - Main entry point and UI
-    ├── ssp_comm.py    - Serial communication module (planned)
-    ├── ssp_control.py - Photometer control module (planned)
-    └── data_logger.py - Data collection and storage (planned)
+    ├── main.py               - Entry point, detects SharpCap, creates launcher
+    ├── ssp_dataaq.py         - Data acquisition window + star selection dialogs
+    ├── ssp_comm.py           - Serial communication + UI message pump
+    ├── ssp_config.py         - JSON configuration
+    ├── ssp_catalog.py        - Star catalog
+    ├── ssp_dialogs.py        - Utility dialogs
+    ├── ssp_extinction.py     - Extinction calculations
+    ├── ssp_allsky.py         - All Sky calibration
+    ├── ssp_location_utils.py - Observer location, Alt/Az, airmass
+    ├── ssp_docking.py        - Bottom-docking support
+    ├── night_mode.py         - Night-mode theme
+    └── starparm_latest.csv   - PEP star catalog
 ```
 
 ## Development Status
 
-**Current Version**: 0.1.0 (Alpha)
+**Current Version**: 0.1.6
 
-- [x] Project structure created
-- [x] Basic UI framework
-- [ ] Serial communication implementation
-- [ ] Slow mode data collection
-- [ ] Fast mode data collection
-- [ ] Configuration management
-- [ ] File output system
-- [ ] SharpCap integration
+- [x] Project structure and UI framework
+- [x] Serial communication (SSP-3a / SSP-5a)
+- [x] Slow mode data collection, including 6/8-interval binning
+- [x] Trial mode
+- [x] Configuration management
+- [x] File output (.raw and .tab)
+- [x] SharpCap integration (toolbar button, GOTO, docking)
+- [x] Star catalog and first-order extinction star selection
+- [x] All Sky calibration (extinction coefficients)
+- [x] Night mode
+- [x] Memory leak fix for long sessions with a guide camera running
+- [ ] Fast mode
+- [ ] Very fast mode
 
 ## Related Projects
 

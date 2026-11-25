@@ -641,7 +641,7 @@ Priority order for additional features:
 
 ## Known Limitations
 
-### Current Version (0.1.4)
+### Current Version (0.1.6)
 - Slow mode only (fast/vfast not implemented)
 - Manual filter changes only (automatic filter bar not implemented)
 - First-order extinction only (second-order requires more complex modeling)
@@ -650,7 +650,7 @@ Priority order for additional features:
 - All Sky Calibration requires manual data file preparation
 
 ### Platform
-- **IronPython 2.7** required (SharpCap environment)
+- **IronPython 3.4** required (SharpCap environment)
 - **Windows only** (.NET Framework dependency)
 - **SSP-3a or SSP-5a photometer** required for actual use
 - **COM port** must be available (no USB virtual COM support guaranteed)

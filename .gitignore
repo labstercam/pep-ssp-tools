@@ -1,0 +1,18 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local runtime / test output
+*.bak
+*.log
+
+# Diagnostic sampler output (SharpCap-SSP/tools/monitor_sharpcap.ps1)
+SharpCap-SSP/phase0/
+phase0/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

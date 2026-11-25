@@ -404,6 +404,99 @@ When GOTO fails:
 - Changed `SSPDataAcquisitionWindow.__init__()` to accept same parameters
 - Must pass actual SharpCap object, not just boolean flag
 
+## UI Threading and the Message Pump (Memory Fix)
+
+### The Problem
+
+Every handler in the SSP window runs on **SharpCap's UI thread** (the window is launched
+from `SharpCap.AddCustomButton`). A blocking `time.sleep()` in that thread stops the
+Windows message pump. If a camera is running, its frames queue up in SharpCap instead of
+being released, and memory climbs until the process dies.
+
+Measured: with SSP capturing and a camera live, private bytes grew ~0.6-0.9 MB/s. With
+either one alone, memory was flat. The full record is in `MEMORY_ANALYSIS.md`.
+
+### The Solution: a registerable pump callback
+
+`ssp_comm.py` provides the mechanism. It deliberately does **not** import
+`System.Windows.Forms`, so it can be used from a non-GUI context (standalone IronPython,
+test scripts) without dragging in WinForms:
+
+```python
+# ssp_comm.py
+_pump_callback = None
+_pump_slice = 0.05  # seconds between pumps
+
+def set_pump_callback(callback):
+    """GUI layer supplies Application.DoEvents; None disables pumping."""
+    global _pump_callback
+    _pump_callback = callback
+
+def pump_sleep(seconds, slice_seconds=None):
+    """Sleep in slices, pumping UI messages between them."""
+    if _pump_callback is None:
+        time.sleep(seconds)          # no UI -> behave like time.sleep
+        return
+    _slice = _pump_slice if slice_seconds is None else slice_seconds
+    remaining = seconds
+    while remaining > 0:
+        chunk = _slice if remaining > _slice else remaining
+        time.sleep(chunk)
+        remaining -= chunk
+        try:
+            _pump_callback()
+        except Exception:
+            pass                     # a pump failure must not abort the wait
+```
+
+The GUI layer registers it once, from `SSPDataAcquisitionWindow.__init__`:
+
+```python
+# ssp_dataaq.py - wrapped in a lambda on purpose
+ssp_comm.set_pump_callback(lambda: Application.DoEvents())
+```
+
+> **Why the lambda?** A bare .NET static method reference (`Application.DoEvents`) is not
+> reliably callable across IronPython versions. Wrapping it costs nothing and is portable.
+
+### Which waits pump, and which do not
+
+| Site | File | Window | Pumps? |
+|---|---|---|---|
+| `get_slow_count` integration wait | `ssp_comm.py` | 1.15-10.15 s per count | **yes** |
+| `_read_with_timeout` polling loop | `ssp_comm.py` | up to 2 s | **yes** (throttled to `_pump_slice`) |
+| `_slew_to_star` mount settle loop | `ssp_dataaq.py` | up to ~32 s | **yes** |
+| Filter home / select retry pauses | `ssp_comm.py` | 2 s each | **no, deliberately** |
+
+The filter retry pauses are left blocking because they run inside `select_filter`, which
+`_on_start` calls **before** the START button is disabled. Pumping there would let a click
+re-enter `_on_start` mid-command. They are error-path retries, not steady state.
+
+### Re-entrancy: what pumping makes reachable
+
+Because the pump can deliver a click or a close during a wait, three guards exist:
+
+| Guard | Where | Protects against |
+|---|---|---|
+| `self._closing` | set in `_on_form_closing`; checked in the count loop, after the loop, and in `_do_trial_mode` | touching controls that are being disposed |
+| `self._trial_busy` | set/cleared in `_do_trial_mode` with `try/finally` | a second serial transaction nesting on the same port |
+| START button disabled | `_on_start`, before the count loop | re-entering the normal acquisition path |
+
+Note the **ordering trap** in `_on_start`: the early return on `_closing` must come
+*before* the binning step, because binning indexes `counts` in pairs
+(`counts[i] + counts[i+1]`) and a mid-loop break leaves a short list.
+
+### Rules for new blocking code
+
+1. **Never** call `time.sleep()` in a UI-thread handler. Use `ssp_comm.pump_sleep()`.
+2. If you add a new long wait in `ssp_comm.py`, use `pump_sleep()` or the `_pump_callback`
+   throttle — do not assume a UI exists.
+3. If the wait can deliver a click or a close, add a guard flag checked at the top of the
+   handler, set before the wait, and cleared in a `finally`.
+4. If the guard's early return skips later index-based work, make sure the skipped work
+   cannot run on a partial result set.
+
+
 ## Contact & Resources
 - Repository: labstercam/pep-ssp-tools
 - Reference: occultation-manager (same patterns)
