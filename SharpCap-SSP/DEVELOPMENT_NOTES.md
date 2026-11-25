@@ -102,20 +102,28 @@ From `SharpCap.Interfaces`:
 - `night_mode.NightMode`
 
 ### WinForms Z-Order Issues
-Controls added **later** appear **on top**. For overlapping controls:
+Controls added **later** sit **behind** earlier ones (`Controls.Add` appends to the
+collection, and child index 0 is the front of the z-order). A later control that
+overlaps an earlier one is therefore **hidden behind it** unless it is explicitly
+raised.
+
+`BringToFront()` only has an effect **after** the control has been added - called
+before `Controls.Add` the control has no parent, so the call is a no-op:
 
 ```python
-# Add base controls first
-self.Controls.Add(self.status_text)
-self.Controls.Add(self.start_button)
+# Correct - raise AFTER Add
+self.Controls.Add(self.goto_button)
+self.goto_button.BringToFront()
 
-# Add GOTO button LAST (at end of _setup_ui) so it's on top
-if self.sharpcap_available:
-    self.goto_button = Button()
-    # ... configure button ...
-    self.goto_button.BringToFront()  # Extra insurance
-    self.Controls.Add(self.goto_button)
+# Wrong - the control has no parent yet, so this does nothing:
+# self.goto_button.BringToFront()
+# self.Controls.Add(self.goto_button)
 ```
+
+Verified by rendering two overlapping panels: the first-added panel stays on top
+until the second is explicitly `BringToFront()`-ed. Placing a control where an
+earlier opaque control (e.g. `current_target_label`) overlaps it hides it
+entirely - position new controls to avoid the overlap **and** raise them.
 
 ### Button Positioning
 ```python
@@ -198,12 +206,22 @@ coordinates = self.CoordinateParser.Parse(coord_string, True)
 mount = self.SharpCap.Mounts.SelectedMount
 self.SharpCap.SafeGetAsyncResult(mount.StartSlewToAsync(coordinates, CancellationToken()))
 
-# 4. Wait for settling
-time.sleep(2)
-if not mount.IsSettled:
-    wait_start = time.time()
-    while not mount.IsSettled and (time.time() - wait_start) < 30:
-        time.sleep(1)
+# 4. Wait for the mount to stop slewing and settle (_wait_for_mount_settle)
+#    Layered, ported from occultation-manager; all waits pump the UI via
+#    ssp_comm.pump_sleep so the running camera's frame queue drains.
+if hasattr(mount, 'Slewing'):           # motion monitor (300 s cap)
+    while mount.Slewing:
+        ssp_comm.pump_sleep(0.25)
+elif hasattr(mount, 'IsSlewing'):
+    while mount.IsSlewing:
+        ssp_comm.pump_sleep(0.25)
+
+if hasattr(mount, 'WaitUntilSettled'):  # preferred, non-fatal on ambiguity
+    self.SharpCap.SafeGetAsyncResult(mount.WaitUntilSettled(True, CancellationToken()))
+else:                                   # best-effort fallback (20 s each)
+    if hasattr(mount, 'IsSettled'):
+        while not mount.IsSettled:
+            ssp_comm.pump_sleep(0.25)
 ```
 
 ### Manual GOTO Fallback
@@ -265,6 +283,48 @@ finally:
     self._set_goto_buttons_enabled(True)  # stage button only re-enabled if a comp star exists
 ```
 
+### Plate Solve and Sync After GOTO
+A "Plate Solve and Sync" checkbox sits on the current-target label row,
+left-aligned with the "GOTO Selected Star" button (the target label was narrowed
+to 390 px to make room). When ticked,
+`_slew_to_star` calls `_solve_and_sync_mount` after the mount reports settled,
+which runs SharpCap's `mount.SolveAndSync()` (mirrors occultation-manager).
+The tick state is stored in config as `plate_solve_sync` (`0`/`1`). The solve is
+skipped when the option is off, when `SolveAndSync` is missing, or when
+`CanSync` is `False`, and a failure is non-fatal.
+
+```python
+# Inside _slew_to_star, after the settle loop:
+self._solve_and_sync_mount(mount, star_type, star)
+```
+
+Because both GOTO buttons funnel through `_slew_to_star`, the option applies to
+"GOTO Selected Star" and the two-stage "GOTO Comp"/"GOTO Var" button alike.
+
+### Mount Settle Logic
+`_wait_for_mount_settle(mount)` replaces the old fixed `time.sleep(2)` + 30 s
+`IsSettled` loop. Ported from occultation-manager, it waits in layers:
+
+1. Motion monitor: poll `mount.Slewing` (else `IsSlewing`) up to 300 s so status
+   stays "Slewing" until physical motion stops (the async task can complete first).
+2. `mount.WaitUntilSettled(True, CancellationToken())` when available; ambiguity
+   is non-fatal (`SafeGetAsyncResult`).
+3. Fallback best-effort polling of `Slewing`/`IsSlewing` (20 s) then `IsSettled`
+   (20 s), each reporting a warning instead of failing.
+4. Last resort (no state at all): a 2 s wait.
+
+All waits use `ssp_comm.pump_sleep` (not `time.sleep`) so SharpCap's UI message
+pump keeps running and the camera's frame queue drains.
+
+The mount async waits - the slew (`StartSlewToAsync`), `WaitUntilSettled`, and the
+optional `SolveAndSync` - are pumped in 0.1 s slices by
+`_pump_until_complete(task, timeout_seconds, label)` instead of a raw
+`SafeGetAsyncResult`, so the screen keeps updating and the frame queue drains during
+the whole GOTO/solve. It degrades to a plain block when the task has no `IsCompleted`,
+stops early if `self._closing` is set, and is capped at 300 s. START is locked for the
+duration (via `_set_goto_buttons_enabled`) so a pumped click cannot start an
+acquisition mid-slew.
+
 ## Testing Strategy
 
 ### test_goto.py Structure
@@ -274,6 +334,9 @@ finally:
 4. **Button Logic** - Confirm conditional creation
 5. **Auto GOTO Stage Logic** - Verify Comp/Var toggle and reset
 6. **Coordinate Formatting** - Validate format strings
+7. **Plate Solve and Sync Logic** - Verify config mapping/gate and default
+8. **Mount Settle Logic** - Verify branch priority (WaitUntilSettled/Slewing/IsSettled/last-resort)
+9. **Task Pump Helper** - Verify `_pump_until_complete` pumps until complete, times out, falls back for unpumpable tasks, and stops on close
 
 ### Debug Output Pattern
 ```python

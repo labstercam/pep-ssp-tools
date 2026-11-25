@@ -32,6 +32,7 @@ class SSPConfig:
         'active_filter_bar': 1,  # 1, 2, or 3
         'auto_manual': 'M',  # 'A' = auto 6-position slider, 'M' = manual 2-position slider
         'night_flag': 0,
+        'plate_solve_sync': 0,  # 1 = plate solve + sync mount after each GOTO
         'telescope_name': 'Enter Telescope',
         'observer_name': 'Enter Observer',
         'observer_latitude': 0.0,   # Decimal degrees, positive North, -90 to +90

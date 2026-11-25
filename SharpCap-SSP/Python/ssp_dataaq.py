@@ -484,7 +484,11 @@ class SSPDataAcquisitionWindow(Form):
         self.current_target_label = Label()
         self.current_target_label.Text = "No target selected - Use Catalog > Select Target Star"
         self.current_target_label.Location = Point(x, y)
-        self.current_target_label.Size = Size(800, 25)
+        # Narrower than the old 800 so the "Plate Solve and Sync" checkbox can sit
+        # on this row, left-aligned with the GOTO button, without overlapping it.
+        # AutoEllipsis marks the rare over-long target line instead of hard-clipping.
+        self.current_target_label.Size = Size(390, 25)
+        self.current_target_label.AutoEllipsis = True
         self.current_target_label.ForeColor = Color.Gray
         self.current_target_label.Font = Font("Arial", 9, FontStyle.Italic)
         self.Controls.Add(self.current_target_label)
@@ -556,8 +560,8 @@ class SSPDataAcquisitionWindow(Form):
             self.goto_button.Size = Size(150, 30)  # Match START button height
             self.goto_button.Enabled = False  # Disabled until target selected
             self.goto_button.Click += self._on_goto_target
-            self.goto_button.BringToFront()  # Ensure it's on top
             self.Controls.Add(self.goto_button)
+            self.goto_button.BringToFront()  # Raise AFTER Add - z-order requires it
             
             # Two-stage GOTO button (Comp <-> Var) to the right of the GOTO button
             stage_x = start_x + self.goto_button.Size.Width + 10  # 10px gap
@@ -567,8 +571,23 @@ class SSPDataAcquisitionWindow(Form):
             self.goto_stage_button.Size = Size(150, 30)  # Match GOTO button size
             self.goto_stage_button.Enabled = False  # Disabled until target selected
             self.goto_stage_button.Click += self._on_goto_stage
-            self.goto_stage_button.BringToFront()  # Ensure it's on top
             self.Controls.Add(self.goto_stage_button)
+            self.goto_stage_button.BringToFront()  # Raise AFTER Add - z-order requires it
+            
+            # "Plate Solve and Sync" option, on the current-target label row,
+            # left-aligned with the "GOTO Selected Star" button. When ticked,
+            # every GOTO (from either GOTO button) runs a SharpCap plate solve +
+            # sync after the mount settles. The state is persisted in the config.
+            self.plate_solve_sync_checkbox = CheckBox()
+            self.plate_solve_sync_checkbox.Text = "Plate Solve and Sync"
+            self.plate_solve_sync_checkbox.Location = Point(
+                start_x,
+                self.current_target_label.Location.Y)
+            self.plate_solve_sync_checkbox.Size = Size(200, 22)
+            self.plate_solve_sync_checkbox.Checked = (self.config.get('plate_solve_sync', 0) == 1)
+            self.plate_solve_sync_checkbox.CheckedChanged += self._on_plate_solve_sync_changed
+            self.Controls.Add(self.plate_solve_sync_checkbox)
+            self.plate_solve_sync_checkbox.BringToFront()  # Raise AFTER Add - z-order requires it
         else:
             pass
     
@@ -2362,17 +2381,39 @@ class SSPDataAcquisitionWindow(Form):
                     self.catalog_combo.SelectedIndex = i
                     break
     
+    def _on_plate_solve_sync_changed(self, sender, event):
+        """Persist the 'Plate Solve and Sync' checkbox state."""
+        enabled = self.plate_solve_sync_checkbox.Checked
+        self.config.set('plate_solve_sync', 1 if enabled else 0)
+        self.config.save()
+        if enabled:
+            self._update_status("Plate Solve and Sync enabled for GOTO")
+        else:
+            self._update_status("Plate Solve and Sync disabled for GOTO")
+    
     def _set_goto_buttons_enabled(self, enabled):
-        """Enable/disable both GOTO buttons (mutual lock during a slew).
+        """Enable/disable the GOTO buttons and lock START during a slew/solve.
         
         The two-stage button also requires a comparison star, so it stays
         disabled for extinction targets even when enabled is True.
+        
+        START is locked too: the GOTO path now pumps the UI message loop while it
+        runs (see the memory-test notes), so a click delivered by the pump could
+        otherwise start an acquisition mid-slew. The previous START state is
+        saved when locking and restored when unlocking.
         """
         if hasattr(self, 'goto_button'):
             self.goto_button.Enabled = enabled
         if hasattr(self, 'goto_stage_button'):
             has_comp = bool(self.current_target and self.current_target.comparison)
             self.goto_stage_button.Enabled = enabled and has_comp
+        # Added for memory test - lock/restore START for the whole GOTO
+        if hasattr(self, 'start_button'):
+            if enabled:
+                self.start_button.Enabled = getattr(self, '_start_enabled_before_goto', True)
+            else:
+                self._start_enabled_before_goto = self.start_button.Enabled
+                self.start_button.Enabled = False
     
     def _on_goto_target(self, sender, event):
         """Handle GOTO button click - slew telescope to selected star."""
@@ -2470,23 +2511,32 @@ class SSPDataAcquisitionWindow(Form):
                 
                 # Added for memory test - checkpoint before slew starts
                 self._log_memory_point("Before StartSlewToAsync")
-                # Use SafeGetAsyncResult to properly wait for slew completion
-                self.SharpCap.SafeGetAsyncResult(mount.StartSlewToAsync(coordinates, CancellationToken()))
+                # Start the slew, then pump the UI message loop while it
+                # completes so the running camera's frame queue drains (an
+                # unpumped block is what caused the original OOM crash), and
+                # unwrap the result with SafeGetAsyncResult.
+                slew_task = mount.StartSlewToAsync(coordinates, CancellationToken())
+                self._pump_until_complete(slew_task, timeout_seconds=300, label="slew")
+                self.SharpCap.SafeGetAsyncResult(slew_task)
                 # Added for memory test - checkpoint after SafeGetAsyncResult returns
                 self._log_memory_point("After SafeGetAsyncResult")
                 
-                # Wait for mount to settle
-                # Added for memory test - pump UI messages while waiting so the
-                # running camera's frame queue drains instead of accumulating.
-                # This is the longest single blocking window (up to ~32 s).
-                ssp_comm.pump_sleep(2)
-                if not mount.IsSettled:
-                    print("Waiting for mount to settle...")
-                    wait_start = time.time()
-                    while not mount.IsSettled and (time.time() - wait_start) < 30:
-                        ssp_comm.pump_sleep(1)
+                # Wait for the mount to stop slewing and settle. Uses SharpCap's
+                # mount helpers (Slewing / WaitUntilSettled) where available, else
+                # best-effort state polling. All waits pump the UI so the running
+                # camera's frame queue drains instead of accumulating.
+                self._wait_for_mount_settle(mount)
                 # Added for memory test - checkpoint after settle loop
                 self._log_memory_point("After settle loop", force_gc=True)
+                
+                # Optionally plate solve + sync the mount after the GOTO.
+                # Shared by every GOTO button (they all call _slew_to_star), and
+                # only runs when the "Plate Solve and Sync" checkbox is ticked.
+                # Added for memory test - bracket the solve with checkpoints so
+                # its blocking window is measurable in the memory log.
+                self._log_memory_point("Before SolveAndSync")
+                self._solve_and_sync_mount(mount, star_type, star)
+                self._log_memory_point("After SolveAndSync", force_gc=True)
                 
                 print("GOTO completed: RA %.4fh, Dec %.4f°" % (ra_hours, dec_degrees))
                 self._update_status("GOTO completed to %s: %s" % (star_type, star.name))
@@ -2521,6 +2571,182 @@ class SSPDataAcquisitionWindow(Form):
             MessageBox.Show(error_msg, "GOTO Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
             self._update_status("GOTO failed: " + str(e))
             return False
+    
+    def _solve_and_sync_mount(self, mount, star_type, star):
+        """Plate solve + sync the mount after a GOTO when the option is enabled.
+        
+        Mirrors the occultation-manager behaviour: skipped silently when the
+        "Plate Solve and Sync" checkbox is off, or when the mount cannot sync.
+        A failure here is non-fatal - the slew itself already succeeded, so the
+        status line reports the outcome and the caller continues.
+        
+        Args:
+            mount: SharpCap mount object (SharpCap.Mounts.SelectedMount)
+            star_type: Human-readable label for status messages (e.g. "Variable")
+            star: StarData object that was slewed to (used for status text)
+        """
+        # Only run when the user has ticked the checkbox (persisted config)
+        if self.config.get('plate_solve_sync', 0) != 1:
+            return
+        
+        # Some mount drivers/versions do not expose SolveAndSync at all
+        if not hasattr(mount, 'SolveAndSync'):
+            print("Skipping SolveAndSync: mount API does not expose SolveAndSync")
+            self._update_status("Mount settled. Plate solve/sync not available")
+            return
+        
+        # Respect the mount's own capability flag when present
+        if hasattr(mount, 'CanSync') and not mount.CanSync:
+            print("Skipping SolveAndSync: mount does not support sync (CanSync=False)")
+            self._update_status("Mount settled. Sync not supported by mount")
+            return
+        
+        self._update_status("Mount settled. Running plate solve/sync...")
+        print("Performing Solve And Sync...")
+        try:
+            # SolveAndSync() returns a task. Pump the UI message loop while it
+            # runs so the running camera's frame queue drains instead of
+            # accumulating (an unpumped block during the solve is exactly the
+            # mechanism behind the original OutOfMemory crash), then unwrap the
+            # bool result with SafeGetAsyncResult.
+            #
+            # Added for memory test - split the timing so the log shows whether
+            # SolveAndSync() itself blocks (synchronous: call >> 0) or returns a
+            # task we can pump (async: pump >> 0). This is the diagnostic that
+            # decides the fix for the solve window's frame buffering.
+            _t0 = time.time()
+            solve_task = mount.SolveAndSync()
+            _t1 = time.time()
+            self._pump_until_complete(solve_task, timeout_seconds=300, label="SolveAndSync")
+            _t2 = time.time()
+            print("SolveAndSync timing: call=%.2fs pump=%.2fs pumpable=%s"
+                  % (_t1 - _t0, _t2 - _t1, hasattr(solve_task, 'IsCompleted')))
+            sync_ok = self.SharpCap.SafeGetAsyncResult(solve_task)
+            if not sync_ok:
+                print("Warning: SolveAndSync reported failure")
+                self._update_status("Plate solve/sync to %s completed with warning" % star_type)
+            else:
+                self._update_status("Plate solve/sync complete for %s: %s" % (star_type, star.name))
+        except Exception as sync_ex:
+            print("Warning: SolveAndSync failed: %s" % str(sync_ex))
+            self._update_status("Plate solve/sync failed; continuing")
+    
+    def _pump_until_complete(self, task, timeout_seconds=300, label="operation"):
+        """Block on a .NET Task while pumping SharpCap's UI message loop.
+        
+        Added for memory test - an unpumped blocking wait freezes SharpCap's UI
+        thread, so a running camera's frames queue up and memory can grow (this
+        is the mechanism behind the original OutOfMemory crash; see
+        MEMORY_ANALYSIS.md). Pumps in short slices via ssp_comm.pump_sleep until
+        the task reports complete, then returns so the caller unwraps the result
+        with SafeGetAsyncResult.
+        
+        Degrades to a plain blocking wait when the task cannot be polled (no
+        IsCompleted attribute) or the window is closing, so it is always safe to
+        call; the 300 s cap stops the pump spinning forever on a stuck task.
+        
+        Args:
+            task: a .NET Task returned by a SharpCap/mount async call
+            timeout_seconds: safety cap for the pump loop
+            label: short name, used only for a diagnostic print on timeout
+        """
+        if not hasattr(task, 'IsCompleted'):
+            # Added for memory test - surface the unpumpable case so an unpumped
+            # blocking window can be identified directly from the SharpCap log.
+            print("_pump_until_complete: '%s' task is not pollable (no IsCompleted)"
+                  " - falling back to a plain blocking wait" % label)
+            return  # caller falls back to the plain blocking wait
+        start = time.time()
+        while not task.IsCompleted and (time.time() - start) < timeout_seconds:
+            # Added for memory test - stop pumping if the window began closing
+            if self._closing:
+                break
+            ssp_comm.pump_sleep(0.1)
+    
+    def _wait_for_mount_settle(self, mount):
+        """Wait for the mount to stop slewing and report settled.
+        
+        Ported from occultation-manager's execute_goto_command. Prefers SharpCap's
+        mount helpers (Slewing / IsSlewing / WaitUntilSettled) and falls back to
+        best-effort state polling for mounts that expose none of them. Never
+        raises: settle-state ambiguity is reported and the caller continues (a
+        false "still slewing" is preferable to a false failure).
+        
+        All waits use ssp_comm.pump_sleep so SharpCap's UI message pump keeps
+        running - the running camera's frame queue drains instead of accumulating
+        (see the memory-test notes).
+        
+        Args:
+            mount: SharpCap mount object (SharpCap.Mounts.SelectedMount)
+        """
+        poll = 0.25  # seconds between state polls
+        
+        # 1. Some drivers complete the async task before physical motion fully
+        #    stops. Keep the caller's "Slewing to ..." status until the motion
+        #    flag clears (up to 300 s).
+        if hasattr(mount, 'Slewing'):
+            start = time.time()
+            while mount.Slewing and (time.time() - start) < 300:
+                ssp_comm.pump_sleep(poll)
+        elif hasattr(mount, 'IsSlewing'):
+            start = time.time()
+            while mount.IsSlewing and (time.time() - start) < 300:
+                ssp_comm.pump_sleep(poll)
+        
+        # 2. Prefer SharpCap's settle helper when available. Do not hard-fail on
+        #    settle-state ambiguity to avoid false negatives.
+        self._update_status("Waiting for mount to settle...")
+        if hasattr(mount, 'WaitUntilSettled'):
+            try:
+                settle_task = mount.WaitUntilSettled(True, CancellationToken())
+                self._pump_until_complete(settle_task, timeout_seconds=300, label="settle")
+                self.SharpCap.SafeGetAsyncResult(settle_task)
+                self._update_status("Mount settled")
+            except Exception as settle_ex:
+                print("Warning: WaitUntilSettled failed: %s" % str(settle_ex))
+                self._update_status("Mount settle status unavailable; continuing")
+            return
+        
+        # 3. Fallback: best-effort polling for mounts without WaitUntilSettled.
+        settle_timeout_seconds = 20
+        waited = False
+        
+        if hasattr(mount, 'Slewing'):
+            waited = True
+            start = time.time()
+            while mount.Slewing and (time.time() - start) < settle_timeout_seconds:
+                ssp_comm.pump_sleep(poll)
+            if mount.Slewing:
+                print("Warning: mount still reports slewing after async completion")
+                self._update_status("Mount still reports slewing; continuing")
+            else:
+                self._update_status("Mount settled")
+        elif hasattr(mount, 'IsSlewing'):
+            waited = True
+            start = time.time()
+            while mount.IsSlewing and (time.time() - start) < settle_timeout_seconds:
+                ssp_comm.pump_sleep(poll)
+            if mount.IsSlewing:
+                print("Warning: mount still reports IsSlewing after async completion")
+                self._update_status("Mount still reports slewing; continuing")
+            else:
+                self._update_status("Mount settled")
+        
+        if hasattr(mount, 'IsSettled'):
+            waited = True
+            start = time.time()
+            while (not mount.IsSettled) and (time.time() - start) < settle_timeout_seconds:
+                ssp_comm.pump_sleep(poll)
+            if not mount.IsSettled:
+                print("Warning: mount did not report settled state after async completion")
+                self._update_status("Mount settle state not confirmed; continuing")
+            else:
+                self._update_status("Mount settled")
+        
+        # 4. Last resort: guarantee a minimum settle if the mount exposes no
+        #    motion or settle state at all.
+        if not waited:
+            ssp_comm.pump_sleep(2)
     
     def _on_goto_stage(self, sender, event):
         """Handle two-stage GOTO button click - slew to Comp, then Var (toggles each time)."""
