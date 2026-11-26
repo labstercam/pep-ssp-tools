@@ -141,6 +141,11 @@ class SSPDataAcquisitionWindow(Form):
         # Added for memory test - re-entrancy guard for trial mode, which runs
         # without disabling the START button
         self._trial_busy = False
+        # Added for the sequence engine - set when a sequence run is aborted
+        # (STOP SEQUENCE) or when the window is closing. Checked alongside
+        # _closing in take_reading and the count loop. Always False outside a
+        # sequence run, so the manual START path is unaffected.
+        self._sequence_abort = False
         # Added for memory test (Phase 2) - cached bold Font for the target
         # label, created on first use and disposed in _on_form_closed
         self._target_label_font = None
@@ -1673,13 +1678,11 @@ class SSPDataAcquisitionWindow(Form):
 
     def _on_start(self, sender, event):
         """Handle START button click.
-        
-        Implements data collection following SSPDataq [Get_Counts] logic:
-        1. Record UT date/time at start
-        2. Set gain on photometer  
-        3. Get count readings for specified interval
-        4. Format and display data
-        5. Store in data arrays
+
+        Thin wrapper over take_reading(): reads the UI, resolves the object name
+        and catalog code, then delegates the measurement. The measurement logic
+        lives in take_reading() / _collect_counts() so the sequence engine can
+        drive it with explicit parameters (see SEQUENCER_DEVELOPMENT.md).
         """
         if not self.comm.is_connected:
             self._update_status("Error: Not connected to photometer. Use Setup -> Connect to SSP")
@@ -1722,66 +1725,167 @@ class SSPDataAcquisitionWindow(Form):
                           MessageBoxButtons.OK, MessageBoxIcon.Information)
             return
         
+        # Disable button during collection
+        self.start_button.Enabled = False
+        self.start_button.Text = "WAIT"
+        try:
+            self.take_reading(object_val, catalog_code, filter_val, gain_val,
+                              integ_val, interval_val, mode_val)
+        finally:
+            # Re-enable only when the window is not closing (matches the
+            # original, which left the button disabled after a mid-loop close).
+            if not self._closing:
+                self.start_button.Text = "START"
+                self.start_button.Enabled = True
+        
+    def take_reading(self, object_val, catalog_code, filter_val, gain_val,
+                     integ_val, interval_val, mode_val="slow", append=True,
+                     headless=False):
+        """Perform one PEP measurement and record it.
+
+        Extracted from the original _on_start so the sequence engine can drive a
+        measurement with explicit parameters. Reads/writes the same data arrays
+        as _on_start, so File -> Save Data is unchanged.
+
+        Args:
+            object_val: Object name for the data line (already resolved, i.e.
+                        without the "(Comp)"/"(Check)" display suffixes)
+            catalog_code: Single-character catalog code (blank for SKY labels)
+            filter_val: Filter name
+            gain_val: Gain (1/10/100)
+            integ_val: Integration time in seconds
+            interval_val: Number of counts (1-8; 6 and 8 are binned to 3/4)
+            mode_val: Count mode (currently only "slow")
+            append: When True, append the reading to the data arrays
+            headless: When True (sequence engine), suppress modal dialogs and
+                      log warnings instead (NFR-3)
+
+        Returns:
+            (ok, data_line): ok is True when a reading was recorded.
+        """
+        # Bail out if the window is closing or a sequence abort was requested
+        if self._closing or self._sequence_abort:
+            return (False, None)
+
+        integ_ms = int(integ_val * 1000)  # Convert to milliseconds
+
         # === CRITICAL: Set ALL SSP parameters before data collection ===
         # This ensures SSP hardware is synchronized with UI settings
         # Matches SSPDataq behavior where settings are sent when changed
-        
+
         # Set integration time on photometer (must be done before counts)
         success, msg = self.comm.set_integration(integ_ms)
         if not success:
             self._update_status("Error setting integration time: " + msg)
-            MessageBox.Show("Failed to set integration time:\n" + msg, "SSP Configuration Error",
-                          MessageBoxButtons.OK, MessageBoxIcon.Error)
-            return
-        
+            if not headless:
+                MessageBox.Show("Failed to set integration time:\n" + msg, "SSP Configuration Error",
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+            return (False, None)
+
         # Set gain on photometer
         success, msg = self.comm.set_gain(gain_val)
         if not success:
             self._update_status("Error setting gain: " + msg)
-            MessageBox.Show("Failed to set gain:\n" + msg, "SSP Configuration Error",
-                          MessageBoxButtons.OK, MessageBoxIcon.Error)
-            return
-        
+            if not headless:
+                MessageBox.Show("Failed to set gain:\n" + msg, "SSP Configuration Error",
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+            return (False, None)
+
         # Set filter position (if automated mode)
         auto_manual = self.config.get('auto_manual', 'M')
         if auto_manual == 'A' and filter_val != "" and filter_val.lower() != "home":
-            # Get filter position from current combo selection
-            filter_position = self.filter_combo.SelectedIndex + 1
-            if 1 <= filter_position <= 6:
+            filter_position = self._filter_position_for_name(filter_val)
+            if filter_position is not None and 1 <= filter_position <= 6:
                 success, retry_count, msg = self.comm.select_filter(filter_position)
                 if not success:
                     self._update_status("Warning: Filter position not confirmed - " + msg)
-                    # Don't abort - allow user to continue (filter might already be in position)
-                    result = MessageBox.Show(
-                        "Could not confirm filter position:\n" + msg + "\n\nContinue anyway?",
-                        "Filter Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
-                    if result == DialogResult.No:
-                        return
-        
-        # Disable button during collection
-        self.start_button.Enabled = False
-        self.start_button.Text = "WAIT"
-        
+                    if not headless:
+                        # Don't abort - allow user to continue (filter might
+                        # already be in position)
+                        result = MessageBox.Show(
+                            "Could not confirm filter position:\n" + msg + "\n\nContinue anyway?",
+                            "Filter Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+                        if result == DialogResult.No:
+                            return (False, None)
+
         # Show initial status message (matches original)
         self._update_status("Getting count data for " + filter_val + " filter - please wait")
-        
-        # Record start time (UT)
+
+        # Record start time (UT) BEFORE the count loop (matches original)
         ut_start = DateTime.UtcNow
-        
-        # Collect counts for specified interval
+
+        # Collect counts for the specified interval (retry + 6/8 binning inside)
+        counts, binning = self._collect_counts(integ_val, interval_val, integ_ms)
+        if counts is None:
+            # Aborted mid-loop (window closing / sequence abort)
+            return (False, None)
+
+        # Calculate mid-point timestamp (matches original SSPDataq [UTtimeCorrected])
+        # Original: MidCount = int((IntervalRecord * (Integ/1000))/2)
+        # Then adds MidCount seconds to recorded UT time.
+        # Correct the total integration time for 6 or 8 readings (sum of pairs)
+        # by multiplying by the binning.
+        total_integration_sec = len(counts) * integ_val * binning
+        mid_count_sec = int(total_integration_sec / 2.0)
+        ut_midpoint = ut_start.AddSeconds(mid_count_sec)
+        ut_date_str = ut_midpoint.ToString("MM-dd-yyyy")
+        ut_time_str = ut_midpoint.ToString("HH:mm:ss")
+
+        # Integration string: matches the original f"{float(integ_text) * binning:0.2f}"
+        integ_str = "%.2f" % (float(integ_val) * binning)
+
+        # Format data for display and storage (final summary line)
+        # Format: "MM-DD-YYYY HH:MM:SS C OBJECTNAME F XXXXX XXXXX XXXXX XXXXX II GG NOTES"
+        data_line = self._format_data_line(
+            ut_date_str, ut_time_str, catalog_code, object_val,
+            filter_val, counts, integ_str, str(gain_val)
+        )
+        # Tab format data line
+        data_line_tab = self._format_data_line_tab(
+            ut_date_str, ut_time_str, catalog_code, object_val,
+            filter_val, counts, integ_str, str(gain_val)
+        )
+
+        if append:
+            # Add to data arrays
+            self.saved_data.append(data_line)
+            self.saved_data_tab.append(data_line_tab)
+            self.data_array.insert(0, data_line)  # Insert at beginning for reverse display
+
+            # Add to listbox (display in reverse chronological order)
+            self.data_listbox.Items.Insert(0, data_line)
+
+        self._update_status("Data collection complete - " + str(len(counts)) + " readings." + (" Binned: " + str(binning == 2) if binning == 2 else ""))
+
+        # Added for memory test - print memory stats after each completed reading
+        self._mem_reading_count += 1
+        self._print_memory_stats(self._mem_reading_count)
+
+        return (True, data_line)
+    
+    def _collect_counts(self, integ_val, interval_val, integ_ms):
+        """Collect `interval_val` slow counts; bin 6/8 to 3/4 readings.
+
+        Extracted from the original _on_start count loop (including the single
+        retry and the 6/8 pair-binning). Returns (counts, binning), or
+        (None, 1) when the window is closing or a sequence abort was requested
+        mid-loop. The abort check is deliberately placed before the binning
+        step, which indexes counts in pairs (a mid-loop break would otherwise
+        leave a short list and raise IndexError).
+        """
         counts = []
-        # Indicate if values are binned by summing pairs for special 6 or 8 intervals
         binning = 1
         if interval_val in [6, 8]:
             binning = 2  # Sum pairs of counts for 6 or 8 intervals
 
         for i in range(interval_val):
             # Added for memory test - stop if the window started closing while
-            # the integration wait was pumping messages
-            if self._closing:
-                break
+            # the integration wait was pumping messages (also covers a sequence
+            # abort, which must not touch controls that are being disposed)
+            if self._closing or self._sequence_abort:
+                return (None, 1)
             success, count_str, error_msg = self.comm.get_slow_count(integ_ms)
-            
+
             if success:
                 counts.append(count_str)
                 # Display count as it's collected (matches original: "Count 1 = 00496")
@@ -1796,60 +1900,44 @@ class SSPDataAcquisitionWindow(Form):
                 else:
                     self._update_status("Failed to get count after retry")
                     counts.append("00000")  # Insert zero on failure
-        
-        # Added for memory test - if the window is closing, stop before any
-        # further control access or data formatting. The binning step below
-        # indexes pairs, which a mid-loop break would not have produced.
-        if self._closing:
-            return
-        
-        # Special treatement when  of 6 or 8 is chosen.
-        # Sum pairs of counts to reduce to 3 or 4 readings, respectively so that it conforms to the standard output
-        # This enables, say, 5s integrations for bright stars instead of 10s to avoid saturation
-        # but keeps the output to 3 or 4 values
+
+        # Added for memory test - if the window is closing (or a sequence abort
+        # was requested), stop before the binning step below, which indexes
+        # counts in pairs and would raise IndexError on a short list.
+        if self._closing or self._sequence_abort:
+            return (None, 1)
+
+        # Special treatment when 6 or 8 is chosen: sum pairs of counts to reduce
+        # to 3 or 4 readings so the output conforms to the standard. This
+        # enables, say, 5s integrations for bright stars instead of 10s to avoid
+        # saturation while keeping the output to 3 or 4 values.
         if binning == 2:
             counts = [str(int(counts[i]) + int(counts[i+1])) for i in range(0, len(counts), 2)]
 
-        # Re-enable button
-        self.start_button.Text = "START"
-        self.start_button.Enabled = True
-        
-        # Calculate mid-point timestamp (matches original SSPDataq [UTtimeCorrected])
-        # Original: MidCount = int((IntervalRecord * (Integ/1000))/2)
-        # Then adds MidCount seconds to recorded UT time
-        # Correct integration total time for 6 or 8 readings (sum of pairs) by multiplying by the binning
-        total_integration_sec = len(counts) * integ_val * binning
-        mid_count_sec = int(total_integration_sec / 2.0)
-        ut_midpoint = ut_start.AddSeconds(mid_count_sec)
-        ut_date_str = ut_midpoint.ToString("MM-dd-yyyy")
-        ut_time_str = ut_midpoint.ToString("HH:mm:ss")
-        
-        # Format data for display and storage (final summary line)
-        # Format: "MM-DD-YYYY HH:MM:SS C OBJECTNAME F XXXXX XXXXX XXXXX XXXXX II GG NOTES"
-        data_line = self._format_data_line(
-            ut_date_str, ut_time_str, catalog_code, object_val,
-            filter_val, counts, f"{float(integ_text) * binning:0.2f}", str(gain_val)
-        )
-        # Tab format data line
-        data_line_tab = self._format_data_line_tab(
-            ut_date_str, ut_time_str, catalog_code, object_val,
-            filter_val, counts, f"{float(integ_text) * binning:0.2f}", str(gain_val)
-        )
-        
-        # Add to data arrays
-        self.saved_data.append(data_line)
-        self.saved_data_tab.append(data_line_tab)
-        self.data_array.insert(0, data_line)  # Insert at beginning for reverse display
-        
-        # Add to listbox (display in reverse chronological order)
-        self.data_listbox.Items.Insert(0, data_line)
-        
-        self._update_status("Data collection complete - " + str(len(counts)) + " readings." + (" Binned: " + str(binning == 2) if binning == 2 else ""))
-        
-        # Added for memory test - print memory stats after each completed reading
-        self._mem_reading_count += 1
-        self._print_memory_stats(self._mem_reading_count)
-    
+        return (counts, binning)
+
+    def _filter_position_for_name(self, filter_name):
+        """Return the 1-based hardware position of a filter, else None.
+
+        Maps a filter *name* to its slider position on the active filter bar so
+        the sequence engine can name a filter directly. The manual path used the
+        combo index, which equals this position because the combo is populated in
+        bar order. "Home" and any name not on the active bar return None so no
+        position command is sent.
+        """
+        try:
+            active_bar = self.config.get('active_filter_bar', 1)
+            filter_bars = self.config.get('filter_bars', [])
+            bar_index = active_bar - 1
+            if 0 <= bar_index < len(filter_bars):
+                names = filter_bars[bar_index]
+                for i in range(len(names)):
+                    if str(names[i]) == str(filter_name):
+                        return i + 1
+        except Exception:
+            pass
+        return None
+
     def _do_trial_mode(self, filter_val, gain_val, integ_ms):
         """Execute trial mode (single test reading).
         
