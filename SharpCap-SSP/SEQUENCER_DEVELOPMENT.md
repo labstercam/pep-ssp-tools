@@ -1112,8 +1112,9 @@ observable (R4).
 Work is split into five phases. Each phase is independently shippable and has
 explicit acceptance criteria. Phases 1-2 deliver the core value; 3-4 polish.
 
-**Progress:** Phase 0 (decisions), Phase 1 (core refactor) and Phase 2
-(sequence engine + minimal UI) are implemented. Phases 3-4 remain.
+**Progress:** Phase 0 (decisions), Phase 1 (core refactor), Phase 2 (sequence
+engine + minimal UI) and Phase 3 (builder dialog + named persistence) are
+implemented. Phase 4 (polish/docs/release) remains.
 
 ### Phase 0 — Spikes and decisions (0.5 day)
 
@@ -1155,7 +1156,7 @@ pass; new tests 1-3 pass. **No UI change.**
 stops on minutes/observations/STOP; a mid-run close unwinds cleanly; GOTO steps
 honour Plate Solve and Sync; standalone mode skips GOTO and still measures.
 
-### Phase 3 — Builder dialog + templates (2-3 days)
+### Phase 3 — Builder dialog + templates (2-3 days) ✅ Implemented
 
 | Task | Detail |
 |---|---|
@@ -1349,6 +1350,7 @@ backward compatibility where they map cleanly (`COUNT` → `MEASURE`, `PAUSE` �
 | 2026-11-26 | Phase 0 decisions recorded: filter mapping via `comm.select_filter` (auto only) + combo sync with `updating_filter_combo`; Alt/Az via `ssp_extinction.AirmassCalculator` (unset location → skip, below horizon → abort); `WAIT_UNTIL` uses an absolute UTC date/time (≤ 30 min late → proceed with a warning, > 30 min late → stop the run with a warning). |
 | 2026-11-26 | Phase 1 implemented: `take_reading` / `_collect_counts` / `_filter_position_for_name` extracted from `_on_start`; `ssp_dataaq.py`; `test_sequence.py` added. |
 | 2026-11-26 | Phase 2 implemented: `ssp_sequence.py` (model, `.ssp`-text + JSON I/O, templates); executor + step handlers + `headless` GOTO in `ssp_dataaq.py`; `ssp_config.py` sequence keys; Sequence menu and RUN/STOP buttons; `test_sequence.py` tests 4-13. |
+| 2026-11-26 | Phase 3 implemented: `ssp_sequence.py` editor helpers (`format_step`, `step_from_fields`, `fields_from_step`) and named storage (`sequences_dir`, `save_named`, `load_named`, `list_names`, `delete_named`); `SequenceDialog` in `ssp_dialogs.py`; `Sequence → Edit Sequence…` wiring + last-sequence/run-length persistence in `ssp_dataaq.py`; `test_sequence.py` tests 13-14. |
 
 
 

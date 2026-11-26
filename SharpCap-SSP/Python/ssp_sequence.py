@@ -22,6 +22,7 @@ Version: 0.2.0 (Phase 2)
 """
 
 import json
+import os
 import re
 
 
@@ -384,5 +385,142 @@ def build_templates():
     templates['V-C-K'] = seq
 
     return templates
+
+
+# --- editor field helpers (used by SequenceDialog) ---------------------------
+
+def _kv_text(params):
+    """Render a param dict as 'k=v, k=v' (sorted, for the dialog field)."""
+    return ", ".join("%s=%s" % (k, params[k]) for k in sorted(params))
+
+
+def format_step(step, index=None):
+    """One-line display string, e.g. '3  MEASURE filter=V, integ=5.0, interval=3'."""
+    prefix = ("%d  " % index) if index is not None else ""
+    return prefix + _step_to_text(step)
+
+
+def step_from_fields(kind, value="", label="", params_text=""):
+    """Build a SequenceStep from the dialog's fields.
+
+    Args:
+        kind: step kind (GOTO / MEASURE / SKY / FILTER / WAIT / WAIT_UNTIL /
+              ABORT_IF / REPEAT / END)
+        value: kind-specific primary field (GOTO star or coords, FILTER name,
+               WAIT seconds, WAIT_UNTIL datetime, REPEAT count)
+        label: SKY label (SKY/SKYNEXT/SKYLAST)
+        params_text: 'k=v, k=v' pairs (MEASURE/SKY/ABORT_IF, or GOTO coords)
+    """
+    kind = str(kind).upper()
+    if kind == 'GOTO':
+        return _parse_goto((value or params_text or 'V').strip())
+    if kind == 'MEASURE':
+        return SequenceStep('MEASURE', **_coerce_measure(_parse_kv(params_text)))
+    if kind == 'SKY':
+        params = _coerce_measure(_parse_kv(params_text))
+        return SequenceStep('SKY', label=((label or 'SKYLAST').strip() or 'SKYLAST'),
+                            **params)
+    if kind == 'FILTER':
+        return SequenceStep('FILTER', filter=((value or '').strip() or None))
+    if kind == 'WAIT':
+        return SequenceStep('WAIT', seconds=_to_float(value, 0.0))
+    if kind == 'WAIT_UNTIL':
+        return SequenceStep('WAIT_UNTIL', utc_datetime=(value or '').strip())
+    if kind == 'ABORT_IF':
+        return SequenceStep('ABORT_IF', **_coerce_measure(_parse_kv(params_text)))
+    if kind == 'REPEAT':
+        return SequenceStep('REPEAT', count=_to_int(value, 1) or 1)
+    if kind == 'END':
+        return SequenceStep('END')
+    return SequenceStep(kind)
+
+
+def fields_from_step(step):
+    """Return (kind, value, label, params_text) to populate the editor fields."""
+    kind = step.kind
+    params = step.params
+    if kind == 'GOTO':
+        if 'ra' in params and 'dec' in params:
+            value = "%s,%s" % (params['ra'], params['dec'])
+        elif 'd_ra_h' in params or 'd_dec_deg' in params:
+            value = "OFFSET,%s,%s" % (params.get('d_ra_h', 0),
+                                      params.get('d_dec_deg', 0))
+        else:
+            value = params.get('star_ref', 'V')
+        return (kind, value, '', '')
+    if kind == 'MEASURE':
+        return (kind, '', '', _kv_text(params))
+    if kind == 'SKY':
+        rest = dict(params)
+        label = rest.pop('label', 'SKYLAST')
+        return (kind, '', label, _kv_text(rest))
+    if kind == 'FILTER':
+        return (kind, params.get('filter') or '', '', '')
+    if kind == 'WAIT':
+        return (kind, _fmt_num(params.get('seconds', 0)), '', '')
+    if kind == 'WAIT_UNTIL':
+        return (kind, params.get('utc_datetime', ''), '', '')
+    if kind == 'ABORT_IF':
+        return (kind, '', '', _kv_text(params))
+    if kind == 'REPEAT':
+        return (kind, str(params.get('count', 1)), '', '')
+    return (kind, '', '', '')
+
+# --- named sequence storage --------------------------------------------------
+
+def _safe_name(name):
+    """Sanitise a sequence name for use as a filename."""
+    bad = r'<>:"/\|?*'
+    out = ''.join(('_' if ch in bad else ch) for ch in str(name)).strip()
+    return out or 'sequence'
+
+
+def sequences_dir(base_dir):
+    """Return (creating if needed) the 'sequences' subdirectory of base_dir."""
+    path = os.path.join(base_dir, 'sequences')
+    try:
+        if not os.path.isdir(path):
+            os.makedirs(path)
+    except Exception:
+        pass
+    return path
+
+
+def list_names(directory):
+    """Return the sorted sequence names (*.json, without the extension)."""
+    names = []
+    try:
+        for entry in os.listdir(directory):
+            if entry.lower().endswith('.json'):
+                names.append(entry[:-5])
+    except Exception:
+        pass
+    names.sort()
+    return names
+
+
+def save_named(seq, directory, name=None):
+    """Save seq as <directory>/<name>.json. Returns the file path."""
+    if not name:
+        name = seq.name
+    path = os.path.join(directory, _safe_name(name) + '.json')
+    save_json(seq, path)
+    return path
+
+
+def load_named(directory, name):
+    """Load <directory>/<name>.json into a PEPSequence."""
+    return load_json(os.path.join(directory, _safe_name(name) + '.json'))
+
+
+def delete_named(directory, name):
+    """Delete <directory>/<name>.json. Returns True if a file was removed."""
+    try:
+        os.remove(os.path.join(directory, _safe_name(name) + '.json'))
+        return True
+    except Exception:
+        return False
+
+
 
 

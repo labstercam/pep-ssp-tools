@@ -320,6 +320,10 @@ class SSPDataAcquisitionWindow(Form):
         
         sequence_menu.DropDownItems.Add(ToolStripSeparator())
         
+        edit_seq_item = ToolStripMenuItem("Edit Sequence...")
+        edit_seq_item.Click += self._on_edit_sequence
+        sequence_menu.DropDownItems.Add(edit_seq_item)
+        
         load_tmpl_menu = ToolStripMenuItem("Load Template")
         for tmpl_name in ssp_sequence.build_templates().keys():
             tmpl_item = ToolStripMenuItem(tmpl_name)
@@ -1859,8 +1863,13 @@ class SSPDataAcquisitionWindow(Form):
                               MessageBoxButtons.OK, MessageBoxIcon.Error)
             return (False, None)
 
-        # Set gain on photometer
-        success, msg = self.comm.set_gain(gain_val)
+        # Set gain on photometer. Coerce to int: the combo/step value may be a
+        # string, and set_gain compares against the ints 1/10/100.
+        try:
+            gain_int = int(gain_val)
+        except (ValueError, TypeError):
+            gain_int = 0
+        success, msg = self.comm.set_gain(gain_int)
         if not success:
             self._update_status("Error setting gain: " + msg)
             if not headless:
@@ -2972,13 +2981,10 @@ class SSPDataAcquisitionWindow(Form):
     # --- Sequence engine (Phase 2) -----------------------------------------
 
     def _on_run_sequence(self, sender, event):
-        """Run the currently loaded sequence."""
+        """Run the loaded sequence (opening the editor if none is loaded)."""
         seq = self.sequence
         if seq is None:
-            MessageBox.Show("No sequence loaded. Use File -> Open Script File\n"
-                            "or Sequence -> Load Template first.",
-                            "Run Sequence", MessageBoxButtons.OK,
-                            MessageBoxIcon.Information)
+            self._on_edit_sequence(sender, event)
             return
         if not self.comm.is_connected:
             self._update_status("Error: connect to the SSP before running a sequence")
@@ -2990,7 +2996,60 @@ class SSPDataAcquisitionWindow(Form):
             minutes = self.config.get('sequence_max_minutes', 60)
             if minutes:
                 seq.max_minutes = float(minutes)
+        self._remember_sequence(seq)
         self.run_sequence(seq)
+
+    def _on_edit_sequence(self, sender, event):
+        """Open the sequence builder dialog; run the sequence if requested."""
+        try:
+            dialog = ssp_dialogs.SequenceDialog(
+                sequence=self.sequence, sequences_dir=self._sequences_dir(),
+                night_mode=self.night_mode)
+            dialog.ShowDialog(self)
+            self.sequence = dialog.sequence
+            if dialog.run_requested:
+                self._remember_sequence(self.sequence)
+                self.run_sequence(self.sequence)
+        except Exception as e:
+            import traceback
+            print("Sequence editor error: %s" % e)
+            print(traceback.format_exc())
+            MessageBox.Show("Could not open the sequence editor:\n" + str(e),
+                            "Sequence Editor", MessageBoxButtons.OK,
+                            MessageBoxIcon.Error)
+
+    def _remember_sequence(self, seq):
+        """Persist the last sequence name + run-length defaults (FR-9)."""
+        try:
+            self.config.set('last_sequence_name', seq.name)
+            self.config.set('sequence_max_minutes',
+                            int(seq.max_minutes) if seq.max_minutes else 0)
+            self.config.set('sequence_max_observations',
+                            int(seq.max_observations) if seq.max_observations else 0)
+            self.config.set('sequence_repeat',
+                            int(seq.repeat) if seq.repeat else 0)
+            self.config.save()
+        except Exception:
+            pass
+
+    def _sequences_dir(self):
+        """Return (creating if needed) the sequences dir under the config dir."""
+        base = None
+        try:
+            base = self.config.config_dir
+        except Exception:
+            base = None
+        if not base:
+            try:
+                base = System.IO.Path.Combine(
+                    System.Environment.GetFolderPath(
+                        System.Environment.SpecialFolder.MyDocuments),
+                    'SharpCap', 'SSP')
+            except Exception:
+                base = None
+        if not base:
+            return None
+        return ssp_sequence.sequences_dir(base)
 
     def _on_stop_sequence(self, sender, event):
         """Request the running sequence to stop after the current step."""
@@ -3177,7 +3236,7 @@ class SSPDataAcquisitionWindow(Form):
             p.get('gain', self.gain_combo.Text),
             float(p.get('integ', self.integ_combo.Text)),
             int(p.get('interval', self.interval_combo.Text)),
-            self.mode_combo.Text)
+            self.mode_combo.Text, headless=True)
         if ok:
             self._sequence_obs_count += 1
         else:
@@ -3197,7 +3256,7 @@ class SSPDataAcquisitionWindow(Form):
             p.get('gain', self.gain_combo.Text),
             float(p.get('integ', self.integ_combo.Text)),
             int(p.get('interval', self.interval_combo.Text)),
-            self.mode_combo.Text)
+            self.mode_combo.Text, headless=True)
         if ok:
             self._sequence_obs_count += 1
 

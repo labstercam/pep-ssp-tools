@@ -15,6 +15,11 @@ import System
 from System.Windows.Forms import *
 from System.Drawing import *
 
+try:
+    import ssp_sequence
+except Exception:
+    ssp_sequence = None
+
 
 class COMPortDialog(Form):
     """Dialog for selecting COM port."""
@@ -848,3 +853,409 @@ class LocationDialog(Form):
         """Handle Cancel button."""
         self.DialogResult = DialogResult.Cancel
         self.Close()
+class SequenceDialog(Form):
+    """Editor for PEP sequences (Phase 3 of the sequencer work).
+
+    Build, load, save and order a sequence. After ShowDialog(), check
+    ``run_requested``; if True the caller should run ``dialog.sequence``.
+    """
+
+    KINDS = ["GOTO", "MEASURE", "SKY", "FILTER", "WAIT", "WAIT_UNTIL",
+             "ABORT_IF", "REPEAT", "END"]
+
+    def __init__(self, sequence=None, sequences_dir=None, night_mode=None):
+        if ssp_sequence is None:
+            raise Exception("ssp_sequence module not available")
+        self.sequence = sequence if sequence is not None else ssp_sequence.PEPSequence("New")
+        self.sequences_dir = sequences_dir
+        self.night_mode = night_mode
+        self.run_requested = False
+        self._loading_fields = False
+
+        self.Text = "Edit Sequence"
+        self.Width = 720
+        self.Height = 470
+        self.MinimumSize = Size(720, 470)
+        self.StartPosition = FormStartPosition.CenterParent
+        self.FormBorderStyle = FormBorderStyle.Sizable
+        self.MaximizeBox = True
+        self.MinimizeBox = False
+
+        self._build_ui()
+        self.kind_combo.SelectedIndex = 1   # default kind: MEASURE
+        self._refresh_sequence_list()
+        self._refresh_steps()
+        self._write_runlength()
+        self._on_kind_changed(None, None)
+
+        if self.night_mode is not None:
+            try:
+                self.night_mode.apply_to_form(self)
+            except Exception:
+                pass
+
+    def _build_ui(self):
+        # Row 1 - saved-sequence picker + file buttons
+        seq_label = Label()
+        seq_label.Text = "Sequence:"
+        seq_label.Location = Point(10, 13)
+        seq_label.Size = Size(70, 20)
+        self.Controls.Add(seq_label)
+
+        self.seq_combo = ComboBox()
+        self.seq_combo.Location = Point(80, 10)
+        self.seq_combo.Size = Size(200, 23)
+        self.seq_combo.DropDownStyle = ComboBoxStyle.DropDown
+        self.seq_combo.Text = self.sequence.name
+        self.Controls.Add(self.seq_combo)
+
+        for text, handler, x, w in (("New", self._on_new, 290, 55),
+                                    ("Load", self._on_load, 350, 55),
+                                    ("Save As", self._on_save, 410, 75),
+                                    ("Delete", self._on_delete, 490, 60)):
+            btn = Button()
+            btn.Text = text
+            btn.Location = Point(x, 9)
+            btn.Size = Size(w, 25)
+            btn.Click += handler
+            self.Controls.Add(btn)
+
+        # Row 2 - step list + reorder buttons
+        steps_label = Label()
+        steps_label.Text = "Steps:"
+        steps_label.Location = Point(10, 46)
+        steps_label.Size = Size(280, 20)
+        self.Controls.Add(steps_label)
+
+        self.steps_list = ListBox()
+        self.steps_list.Location = Point(10, 66)
+        self.steps_list.Size = Size(280, 220)
+        self.steps_list.Font = Font("Courier New", 8)
+        self.steps_list.SelectedIndexChanged += self._on_step_selected
+        self.Controls.Add(self.steps_list)
+
+        for text, handler, x, w in (("Add", self._on_add, 10, 52),
+                                    ("Update", self._on_update, 66, 56),
+                                    ("Remove", self._on_remove, 126, 62),
+                                    ("Up", self._on_up, 192, 44),
+                                    ("Down", self._on_down, 240, 50)):
+            btn = Button()
+            btn.Text = text
+            btn.Location = Point(x, 292)
+            btn.Size = Size(w, 26)
+            btn.Click += handler
+            self.Controls.Add(btn)
+
+        group = GroupBox()
+        group.Text = "Step"
+        group.Location = Point(300, 46)
+        group.Size = Size(396, 272)
+        self.Controls.Add(group)
+
+        def add_field(row, caption, box, width, label_width=70):
+            lbl = Label()
+            lbl.Text = caption
+            lbl.Location = Point(12, row * 30 + 26)
+            lbl.Size = Size(label_width, 20)
+            group.Controls.Add(lbl)
+            box.Location = Point(label_width + 12, row * 30 + 24)
+            box.Size = Size(width, 23)
+            group.Controls.Add(box)
+            return box
+
+        self.kind_combo = ComboBox()
+        self.kind_combo.DropDownStyle = ComboBoxStyle.DropDownList
+        for kind in self.KINDS:
+            self.kind_combo.Items.Add(kind)
+        self.kind_combo.SelectedIndexChanged += self._on_kind_changed
+        add_field(0, "Kind:", self.kind_combo, 150)
+
+        self.value_box = TextBox()
+        add_field(1, "Value:", self.value_box, 310)
+
+        self.label_box = TextBox()
+        add_field(2, "Label:", self.label_box, 160)
+
+        self.params_box = TextBox()
+        add_field(3, "Params:", self.params_box, 310)
+
+        hint = Label()
+        hint.Text = ("Value: GOTO -> V/C/K, RA,Dec or OFFSET,dRA,dDec | FILTER -> name\n"
+                     "WAIT -> seconds | WAIT_UNTIL -> YYYY-MM-DD HH:MM:SS | REPEAT -> count\n"
+                     "Params: k=v pairs, e.g. filter=V, integ=5, interval=3")
+        hint.Location = Point(82, 150)
+        hint.Size = Size(300, 46)
+        group.Controls.Add(hint)
+
+        # Row 3 - run length (units are as labelled; minutes = wall-clock)
+        run_label = Label()
+        run_label.Text = "Run length:"
+        run_label.Location = Point(10, 332)
+        run_label.Size = Size(80, 20)
+        self.Controls.Add(run_label)
+
+        def add_run_box(caption, x, label_width, box_width=55):
+            lbl = Label()
+            lbl.Text = caption
+            lbl.Location = Point(x, 332)
+            lbl.Size = Size(label_width, 20)
+            self.Controls.Add(lbl)
+            box = TextBox()
+            box.Location = Point(x + label_width, 330)
+            box.Size = Size(box_width, 23)
+            self.Controls.Add(box)
+            return box
+
+        self.minutes_box = add_run_box("Max minutes:", 95, 90)
+        self.obs_box = add_run_box("Max observations:", 250, 115)
+        self.repeat_box = add_run_box("Repeat (0=no limit):", 425, 130)
+
+        run_btn = Button()
+        run_btn.Text = "Run"
+        run_btn.Location = Point(10, 366)
+        run_btn.Size = Size(90, 30)
+        run_btn.Click += self._on_run
+        self.Controls.Add(run_btn)
+
+        close_btn = Button()
+        close_btn.Text = "Close"
+        close_btn.Location = Point(110, 366)
+        close_btn.Size = Size(90, 30)
+        close_btn.Click += self._on_close
+        self.Controls.Add(close_btn)
+
+        self.status_label = Label()
+        self.status_label.Text = ""
+        self.status_label.Location = Point(210, 372)
+        self.status_label.Size = Size(486, 20)
+        self.status_label.ForeColor = Color.Gray
+        self.Controls.Add(self.status_label)
+
+    def _set_status(self, text):
+        try:
+            self.status_label.Text = text
+        except Exception:
+            pass
+
+    def _refresh_sequence_list(self):
+        if ssp_sequence is None:
+            return
+        names = []
+        if self.sequences_dir:
+            try:
+                names = ssp_sequence.list_names(self.sequences_dir)
+            except Exception:
+                names = []
+        try:
+            templates = list(ssp_sequence.build_templates().keys())
+        except Exception:
+            templates = []
+        self.seq_combo.Items.Clear()
+        for name in names:
+            self.seq_combo.Items.Add(name)
+        for name in templates:
+            if name not in names:
+                self.seq_combo.Items.Add(name)
+
+    def _refresh_steps(self):
+        self._loading_fields = True
+        try:
+            self.steps_list.Items.Clear()
+            for i, step in enumerate(self.sequence.steps):
+                self.steps_list.Items.Add(ssp_sequence.format_step(step, i + 1))
+        finally:
+            self._loading_fields = False
+        self._set_status("%d steps" % len(self.sequence.steps))
+
+    def _current_name(self):
+        return (self.seq_combo.Text or '').strip()
+
+    def _load_name(self, name):
+        """Load a saved sequence, else a template, else None."""
+        seq = None
+        if self.sequences_dir:
+            try:
+                seq = ssp_sequence.load_named(self.sequences_dir, name)
+            except Exception:
+                seq = None
+        if seq is None:
+            try:
+                seq = ssp_sequence.build_templates().get(name)
+            except Exception:
+                seq = None
+        return seq
+
+    def _on_new(self, sender, event):
+        self.sequence = ssp_sequence.PEPSequence("New")
+        self.seq_combo.Text = "New"
+        self._refresh_steps()
+        self._write_runlength()
+        self._set_status("New sequence")
+
+    def _on_load(self, sender, event):
+        name = self._current_name()
+        if not name:
+            self._set_status("Enter a sequence name to load")
+            return
+        seq = self._load_name(name)
+        if seq is None:
+            MessageBox.Show("Could not load sequence '%s'" % name, "Load Sequence",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            return
+        self.sequence = seq
+        self.seq_combo.Text = seq.name
+        self._refresh_steps()
+        self._write_runlength()
+        self._set_status("Loaded '%s'" % seq.name)
+
+    def _on_save(self, sender, event):
+        name = self._current_name()
+        if not name:
+            self._set_status("Enter a sequence name to save")
+            return
+        self.sequence.name = name
+        self._read_runlength()
+        try:
+            ssp_sequence.save_named(self.sequence, self.sequences_dir, name)
+        except Exception as e:
+            MessageBox.Show("Could not save sequence:\n" + str(e), "Save Sequence",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error)
+            return
+        self._refresh_sequence_list()
+        self.seq_combo.Text = name
+        self._set_status("Saved '%s'" % name)
+
+    def _on_delete(self, sender, event):
+        name = self._current_name()
+        if not name:
+            self._set_status("Nothing to delete")
+            return
+        answer = MessageBox.Show("Delete sequence '%s'?" % name, "Delete Sequence",
+                                 MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+        if answer != DialogResult.Yes:
+            return
+        try:
+            ssp_sequence.delete_named(self.sequences_dir, name)
+        except Exception:
+            pass
+        self._refresh_sequence_list()
+        self._set_status("Deleted '%s'" % name)
+
+    def _kind(self):
+        return str(self.kind_combo.Text or 'GOTO').upper()
+
+    def _on_kind_changed(self, sender, event):
+        """Enable/disable the value/label/params boxes for the selected kind."""
+        if self._loading_fields:
+            return
+        kind = self._kind()
+        self.value_box.Enabled = kind in ('GOTO', 'FILTER', 'WAIT',
+                                          'WAIT_UNTIL', 'REPEAT')
+        self.label_box.Enabled = (kind == 'SKY')
+        self.params_box.Enabled = kind in ('GOTO', 'MEASURE', 'SKY', 'ABORT_IF')
+
+    def _build_step_from_fields(self):
+        return ssp_sequence.step_from_fields(
+            self._kind(), self.value_box.Text, self.label_box.Text,
+            self.params_box.Text)
+
+    def _populate_fields(self, step):
+        self._loading_fields = True
+        try:
+            kind, value, label, params = ssp_sequence.fields_from_step(step)
+            try:
+                self.kind_combo.SelectedIndex = self.KINDS.index(kind)
+            except ValueError:
+                self.kind_combo.SelectedIndex = 1
+            self.value_box.Text = str(value)
+            self.label_box.Text = str(label)
+            self.params_box.Text = str(params)
+        finally:
+            self._loading_fields = False
+        self._on_kind_changed(None, None)
+
+    def _on_step_selected(self, sender, event):
+        if self._loading_fields:
+            return
+        idx = self.steps_list.SelectedIndex
+        if 0 <= idx < len(self.sequence.steps):
+            self._populate_fields(self.sequence.steps[idx])
+
+    def _on_add(self, sender, event):
+        step = self._build_step_from_fields()
+        self.sequence.steps.append(step)
+        self._refresh_steps()
+        self.steps_list.SelectedIndex = len(self.sequence.steps) - 1
+        self._set_status("Added %s" % step.kind)
+
+    def _on_update(self, sender, event):
+        idx = self.steps_list.SelectedIndex
+        if not (0 <= idx < len(self.sequence.steps)):
+            self._set_status("Select a step to update")
+            return
+        self.sequence.steps[idx] = self._build_step_from_fields()
+        self._refresh_steps()
+        self.steps_list.SelectedIndex = idx
+        self._set_status("Updated step %d" % (idx + 1))
+
+    def _on_remove(self, sender, event):
+        idx = self.steps_list.SelectedIndex
+        if not (0 <= idx < len(self.sequence.steps)):
+            self._set_status("Select a step to remove")
+            return
+        del self.sequence.steps[idx]
+        self._refresh_steps()
+        self._set_status("Removed step %d" % (idx + 1))
+
+    def _move(self, delta):
+        idx = self.steps_list.SelectedIndex
+        new = idx + delta
+        if 0 <= idx < len(self.sequence.steps) and 0 <= new < len(self.sequence.steps):
+            steps = self.sequence.steps
+            steps[idx], steps[new] = steps[new], steps[idx]
+            self._refresh_steps()
+            self.steps_list.SelectedIndex = new
+
+    def _on_up(self, sender, event):
+        self._move(-1)
+
+    def _on_down(self, sender, event):
+        self._move(1)
+
+    def _write_runlength(self):
+        self.minutes_box.Text = ("" if not self.sequence.max_minutes
+                                 else "%g" % self.sequence.max_minutes)
+        self.obs_box.Text = ("" if not self.sequence.max_observations
+                             else "%d" % int(self.sequence.max_observations))
+        self.repeat_box.Text = ("" if not self.sequence.repeat
+                                else "%d" % int(self.sequence.repeat))
+
+    def _read_runlength(self):
+        minutes = ssp_sequence._to_float(self.minutes_box.Text, None)
+        self.sequence.max_minutes = minutes if minutes else None
+        obs = ssp_sequence._to_int(self.obs_box.Text, None)
+        self.sequence.max_observations = obs if obs else None
+        repeat = ssp_sequence._to_int(self.repeat_box.Text, None)
+        self.sequence.repeat = repeat if repeat else None
+
+    def _on_run(self, sender, event):
+        self._read_runlength()
+        if not self.sequence.steps:
+            self._set_status("Add at least one step first")
+            return
+        if (not self.sequence.max_minutes and not self.sequence.max_observations
+                and not self.sequence.repeat):
+            answer = MessageBox.Show(
+                "No run-length limit set (minutes / observations / repeat).\n"
+                "Run a single pass?", "Run Sequence",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+            if answer != DialogResult.Yes:
+                return
+        self.run_requested = True
+        self.DialogResult = DialogResult.OK
+        self.Close()
+
+    def _on_close(self, sender, event):
+        self.DialogResult = DialogResult.Cancel
+        self.Close()
+

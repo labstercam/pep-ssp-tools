@@ -311,6 +311,23 @@ def test_take_reading_parity():
 
     return ok
 
+# --- Test 1b: gain type coercion ---------------------------------------------
+
+def test_take_reading_gain_coercion():
+    print("\nTesting take_reading coerces a string gain to int...")
+    if _has_take_reading() is None:
+        return True
+    comm = _FakeComm(counts=["00496"])
+    w = _make_window(comm, _FakeConfig({'auto_manual': 'M'}))
+    res = _with_fake_datetime(lambda: w.take_reading(
+        "V PER", "V", "V", "10", 5.0, 1, "slow", headless=True))
+    if comm.gain_calls == [10] and res[0] is True:
+        print("  ✓ string gain '10' -> comm.set_gain(int 10)")
+        return True
+    print("  ✗ gain_calls = %r (expected [10])" % (comm.gain_calls,))
+    return False
+
+
 # --- Test 2: guards ----------------------------------------------------------
 
 def test_take_reading_guards():
@@ -584,7 +601,7 @@ class _ExecWindow(object):
         self.statuses.append(m)
 
     def take_reading(self, o, c, f, gv, i, iv, m, append=True, headless=False):
-        self.calls.append(('measure', o, c, f))
+        self.calls.append(('measure', o, c, f, headless))
         return (True, 'LINE')
 
     def _slew_to_star(self, star, label, headless=False):
@@ -658,13 +675,19 @@ def test_executor_order():
     seq.max_observations = 8
     w.run_sequence(seq)
 
-    meas = len([c for c in w.calls if c[0] == 'measure'])
+    meas_calls = [c for c in w.calls if c[0] == 'measure']
+    meas = len(meas_calls)
     slews = [c for c in w.calls if c[0] == 'slew']
     ok = True
     if meas == 8:
         print("  ✓ 2 passes produced 8 measures")
     else:
         print("  ✗ measures = %d, expected 8" % meas)
+        ok = False
+    if meas_calls and all(c[4] is True for c in meas_calls):
+        print("  ✓ measurements ran headless (no modal)")
+    else:
+        print("  ✗ measurements not headless: %s" % (meas_calls[:2],))
         ok = False
     if len(slews) == 8 and all(c[3] is True for c in slews):
         print("  ✓ 8 headless slews")
@@ -971,7 +994,89 @@ def test_executor_wait_until():
     return ok
 
 
+# --- Test 13: sequence editor field round-trip -------------------------------
+
+def test_sequence_editor_fields():
+    print("\nTesting sequence editor field round-trip...")
+    try:
+        import ssp_sequence
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+    cases = [
+        ('GOTO', 'C', '', ''),
+        ('GOTO', '12.5,-30.25', '', ''),
+        ('GOTO', 'OFFSET,0.0,0.25', '', ''),
+        ('MEASURE', '', '', 'filter=V, integ=5, interval=3'),
+        ('SKY', '', 'SKYLAST', 'offset=0.0,0.25'),
+        ('FILTER', 'B', '', ''),
+        ('WAIT', '2.5', '', ''),
+        ('WAIT_UNTIL', '2026-11-27 02:45:00', '', ''),
+        ('ABORT_IF', '', '', 'airmass_above=2.5'),
+        ('REPEAT', '3', '', ''),
+        ('END', '', '', ''),
+    ]
+    ok = True
+    for kind, value, label, params in cases:
+        st = ssp_sequence.step_from_fields(kind, value, label, params)
+        k2, v2, l2, p2 = ssp_sequence.fields_from_step(st)
+        st2 = ssp_sequence.step_from_fields(k2, v2, l2, p2)
+        if not (st.kind == st2.kind and st.params == st2.params):
+            print("  ✗ round-trip %s %r -> %r" % (kind, st.params, st2.params))
+            ok = False
+    if ok:
+        print("  ✓ all %d step kinds round-trip through the editor fields" % len(cases))
+    return ok
+
+
+# --- Test 14: named sequence storage (save / load / list / delete) -----------
+
+def test_sequence_named_storage():
+    print("\nTesting sequence named storage (save/load/list/delete)...")
+    try:
+        import ssp_sequence
+        import System
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+    tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ssp_seq_test")
+    ok = True
+    try:
+        sd = ssp_sequence.sequences_dir(tmp)
+        seq = ssp_sequence.build_templates()['V-C-V-C']
+        seq.max_observations = 8
+        ssp_sequence.save_named(seq, sd)
+        if 'V-C-V-C' in ssp_sequence.list_names(sd):
+            print("  ✓ saved and listed 'V-C-V-C'")
+        else:
+            print("  ✗ not listed: %s" % (ssp_sequence.list_names(sd),))
+            ok = False
+        seq2 = ssp_sequence.load_named(sd, 'V-C-V-C')
+        if ([s.kind for s in seq2.steps] == [s.kind for s in seq.steps]
+                and seq2.max_observations == 8):
+            print("  ✓ loaded back identical kinds + run length")
+        else:
+            print("  ✗ load mismatch")
+            ok = False
+        ssp_sequence.delete_named(sd, 'V-C-V-C')
+        if 'V-C-V-C' not in ssp_sequence.list_names(sd):
+            print("  ✓ deleted")
+        else:
+            print("  ✗ still present after delete")
+            ok = False
+    except Exception as e:
+        print("  ✗ storage error: " + str(e))
+        ok = False
+    finally:
+        try:
+            System.IO.Directory.Delete(tmp, True)
+        except Exception:
+            pass
+    return ok
+
+
 # --- Runner ------------------------------------------------------------------
+
 
 
 
@@ -984,6 +1089,7 @@ def main():
 
     tests = [
         ("take_reading parity with _on_start", test_take_reading_parity),
+        ("take_reading gain coercion", test_take_reading_gain_coercion),
         ("take_reading / _collect_counts guards", test_take_reading_guards),
         ("6/8 binning + retry/target fallback", test_collect_counts_binning),
         ("_filter_position_for_name mapping", test_filter_position_for_name),
@@ -996,6 +1102,8 @@ def main():
         ("executor GOTO standalone/headless", test_executor_goto_standalone),
         (".ssp text round-trip", test_ssp_text_roundtrip),
         ("executor WAIT_UNTIL", test_executor_wait_until),
+        ("sequence editor field round-trip", test_sequence_editor_fields),
+        ("sequence named storage", test_sequence_named_storage),
     ]
 
     results = []
