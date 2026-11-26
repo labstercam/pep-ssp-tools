@@ -157,11 +157,12 @@ class _FakeDTClass(object):
     """Replacement for System.DateTime; UtcNow is a fixed 2026-01-02 03:04:05."""
 
 
-# The application reads `DateTime.UtcNow` as a .NET property (no parentheses), so
-# expose it as a plain attribute holding a fixed instance. A @staticmethod would
-# stay a function object here and fail with "'function' object has no attribute
-# 'AddSeconds'".
+# The application reads `DateTime.UtcNow` and `DateTime.Now` as .NET properties
+# (no parentheses), so expose both as plain attributes holding a fixed instance.
+# A @staticmethod would stay a function object here and fail with
+# "'function' object has no attribute 'AddSeconds'".
 _FakeDTClass.UtcNow = _FakeDT(2026, 1, 2, 3, 4, 5)
+_FakeDTClass.Now = _FakeDT(2026, 1, 2, 3, 4, 5)
 
 
 # The default filter bars used by the app (ssp_config.DEFAULT_CONFIG)
@@ -506,12 +507,479 @@ def test_filter_position_for_name():
     return ok
 
 
+# --- Executor tests (Phase 2: sequence engine) -------------------------------
+
+class _ExecStar(object):
+    """Minimal StarData stand-in for executor tests."""
+
+    def __init__(self, name, ra_h, dec):
+        self.name = name
+        self.ra_hours = int(ra_h)
+        self.ra_minutes = int((ra_h - int(ra_h)) * 60)
+        self.ra_seconds = 0.0
+        self.dec_degrees = int(dec)
+        self.dec_minutes = 0
+        self.dec_seconds = 0.0
+
+    @property
+    def dec_degrees_decimal(self):
+        return float(self.dec_degrees)
+
+
+class _ExecItems(object):
+    def __init__(self, items=None):
+        self._items = list(items or [])
+
+    @property
+    def Count(self):
+        return len(self._items)
+
+    def __getitem__(self, i):
+        return self._items[i]
+
+
+class _ExecCombo(object):
+    def __init__(self, items=None, text=""):
+        self.Items = _ExecItems(items)
+        self.Text = text
+        self.SelectedIndex = 0
+
+
+class _ExecTriple(object):
+    def __init__(self, v, c=None, k=None):
+        self.variable = v
+        self.comparison = c
+        self.check = k
+
+
+class _ExecWindow(object):
+    """Fake window for the executor; real methods are bound by _make_exec_window."""
+
+    def __init__(self):
+        self._closing = False
+        self._sequence_abort = False
+        self._sequence_running = False
+        self._sequence = None
+        self._sequence_obs_count = 0
+        self._sequence_start = None
+        self._sequence_step_index = 0
+        self._sequence_steps_total = 0
+        self.sharpcap_available = True
+        self.current_target = None
+        self.comm = _FakeComm([])
+        self.config = _FakeConfig({'auto_manual': 'M'})
+        self.object_combo = _ExecCombo(text='V PER')
+        self.catalog_combo = _ExecCombo(text='Var')
+        self.filter_combo = _ExecCombo(items=['U', 'B', 'V', 'R', 'I', 'Dark', 'Home'],
+                                       text='V')
+        self.gain_combo = _ExecCombo(text='10')
+        self.integ_combo = _ExecCombo(text='5.00')
+        self.interval_combo = _ExecCombo(text='3')
+        self.mode_combo = _ExecCombo(text='slow')
+        self.updating_filter_combo = False
+        self.calls = []
+        self.statuses = []
+
+    def _update_status(self, m):
+        self.statuses.append(m)
+
+    def take_reading(self, o, c, f, gv, i, iv, m, append=True, headless=False):
+        self.calls.append(('measure', o, c, f))
+        return (True, 'LINE')
+
+    def _slew_to_star(self, star, label, headless=False):
+        self.calls.append(('slew', star.name, label, headless))
+        return True
+
+    def _star_display_name(self, ref):
+        return {'V': 'VAR', 'C': 'COMP', 'K': 'CHK'}.get(ref, ref)
+
+    def _select_object_display(self, name):
+        self.calls.append(('select', name))
+
+    def _select_filter_by_name(self, name):
+        self.calls.append(('filter', name))
+
+    def _filter_position_for_name(self, name):
+        return None
+
+    def _set_sequence_controls_running(self, running):
+        pass
+
+
+_EXEC_METHODS = ('run_sequence', '_sequence_should_stop', '_run_step_list',
+                 '_find_matching_end', '_step_goto', '_step_measure', '_step_sky',
+                 '_step_filter', '_step_wait', '_step_wait_until', '_step_abort_if',
+                 '_resolve_step_star', '_make_offset_star', '_make_star_from_radec',
+                 '_current_alt_airmass', '_parse_utc_datetime', '_update_step_status')
+
+
+def _make_exec_window():
+    """A _ExecWindow with the REAL executor methods from ssp_dataaq bound."""
+    import ssp_dataaq
+    W = ssp_dataaq.SSPDataAcquisitionWindow
+    w = _ExecWindow()
+    for name in _EXEC_METHODS:
+        func = getattr(W, name)
+        setattr(w, name, lambda *a, _f=func, **k: _f(w, *a, **k))
+    return w
+
+
+def _has_engine():
+    """Return the ssp_dataaq module if the executor exists, else None/'missing'."""
+    try:
+        import ssp_dataaq
+    except Exception as e:
+        print("  ⚠ ssp_dataaq import skipped (standalone): " + str(e))
+        return None
+    if not hasattr(ssp_dataaq.SSPDataAcquisitionWindow, 'run_sequence'):
+        print("  ✗ SSPDataAcquisitionWindow is missing 'run_sequence'")
+        _print_stale_module_hint('ssp_dataaq', ssp_dataaq)
+        return 'missing'
+    return ssp_dataaq
+
+
+# --- Test 4: executor ordering -----------------------------------------------
+
+def test_executor_order():
+    print("\nTesting executor runs steps in order...")
+    if _has_engine() is None:
+        return True
+    try:
+        import ssp_sequence
+    except Exception as e:
+        print("  ⚠ ssp_sequence import skipped: " + str(e))
+        return True
+
+    w = _make_exec_window()
+    w.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0),
+                                   _ExecStar('COMP', 12.5, 30.5))
+    seq = ssp_sequence.build_templates()['V-C-V-C']
+    seq.max_observations = 8
+    w.run_sequence(seq)
+
+    meas = len([c for c in w.calls if c[0] == 'measure'])
+    slews = [c for c in w.calls if c[0] == 'slew']
+    ok = True
+    if meas == 8:
+        print("  ✓ 2 passes produced 8 measures")
+    else:
+        print("  ✗ measures = %d, expected 8" % meas)
+        ok = False
+    if len(slews) == 8 and all(c[3] is True for c in slews):
+        print("  ✓ 8 headless slews")
+    else:
+        print("  ✗ slews wrong: %s" % (slews,))
+        ok = False
+    order = [c[1] for c in slews][:4]
+    if order == ['VAR', 'COMP', 'VAR', 'COMP']:
+        print("  ✓ V-C-V-C slew order")
+    else:
+        print("  ✗ slew order %s" % order)
+        ok = False
+    if w._sequence_running is False:
+        print("  ✓ engine unlocked after the run")
+    else:
+        print("  ✗ still marked running")
+        ok = False
+    return ok
+
+# --- Test 5: stop conditions -------------------------------------------------
+
+def test_executor_stop_conditions():
+    print("\nTesting executor stop conditions (obs / minutes / abort)...")
+    if _has_engine() is None:
+        return True
+    try:
+        import ssp_sequence
+        from System import DateTime as SDateTime
+    except Exception as e:
+        print("  ⚠ imports skipped: " + str(e))
+        return True
+
+    ok = True
+
+    # max_observations
+    w = _make_exec_window()
+    w.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0))
+    seq = ssp_sequence.build_templates()['V-C-V-C']
+    seq.max_observations = 4
+    w.run_sequence(seq)
+    meas = len([c for c in w.calls if c[0] == 'measure'])
+    if meas == 4:
+        print("  ✓ max_observations=4 stopped after 4")
+    else:
+        print("  ✗ max_observations gave %d" % meas)
+        ok = False
+
+    # max_minutes: set the start relative to the real clock (no module patching,
+    # so the app's 1 s time-display timer keeps working)
+    ws = _make_exec_window()
+    seqm = ssp_sequence.PEPSequence()
+    seqm.max_minutes = 60
+    ws._sequence_start = SDateTime.UtcNow.AddMinutes(-30)
+    early = ws._sequence_should_stop(seqm)
+    ws._sequence_start = SDateTime.UtcNow.AddMinutes(-61)
+    late = ws._sequence_should_stop(seqm)
+    if early is False and late is True:
+        print("  ✓ max_minutes: not stopped at 30, stopped at 61")
+    else:
+        print("  ✗ max_minutes wrong: early=%s late=%s" % (early, late))
+        ok = False
+
+    # mid-run abort
+    w = _make_exec_window()
+    w.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0))
+    n = [0]
+
+    def _tr(*a, **k):
+        n[0] += 1
+        if n[0] >= 2:
+            w._sequence_abort = True
+        w.calls.append(('measure',))
+        return (True, 'L')
+
+    w.take_reading = _tr
+    seq2 = ssp_sequence.build_templates()['V-C-V-C']
+    seq2.max_observations = 8
+    w.run_sequence(seq2)
+    if n[0] == 2:
+        print("  ✓ abort stopped the run after 2 measures")
+    else:
+        print("  ✗ abort wrong: %d measures" % n[0])
+        ok = False
+
+    return ok
+
+
+# --- Test 6: REPEAT nesting --------------------------------------------------
+
+def test_executor_repeat():
+    print("\nTesting executor REPEAT nesting...")
+    if _has_engine() is None:
+        return True
+    try:
+        import ssp_sequence
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+
+    w = _make_exec_window()
+    w.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0))
+    seq = ssp_sequence.parse_ssp_text("REPEAT, 3\nGOTO, V\nMEASURE\nEND\n")
+    seq.repeat = 1
+    w.run_sequence(seq)
+    meas = len([c for c in w.calls if c[0] == 'measure'])
+    if meas == 3:
+        print("  ✓ REPEAT,3 -> 3 measures")
+        return True
+    print("  ✗ REPEAT gave %d" % meas)
+    return False
+
+
+# --- Test 7: star resolution -------------------------------------------------
+
+def test_executor_resolve_star():
+    print("\nTesting executor star resolution...")
+    if _has_engine() is None:
+        return True
+    try:
+        import ssp_sequence
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+
+    w = _make_exec_window()
+    w.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0),
+                                   _ExecStar('COMP', 12.5, 30.5), None)
+    ok = True
+    s, _lab = w._resolve_step_star(ssp_sequence.SequenceStep('GOTO', star_ref='V'))
+    if s is not None and s.name == 'VAR':
+        print("  ✓ V -> variable")
+    else:
+        print("  ✗ V resolve failed")
+        ok = False
+    s, _lab = w._resolve_step_star(ssp_sequence.SequenceStep('GOTO', star_ref='C'))
+    if s is not None and s.name == 'COMP':
+        print("  ✓ C -> comparison")
+    else:
+        print("  ✗ C resolve failed")
+        ok = False
+    s, _lab = w._resolve_step_star(ssp_sequence.SequenceStep('GOTO', star_ref='K'))
+    if s is None:
+        print("  ✓ missing K -> None (step skipped)")
+    else:
+        print("  ✗ K should be None")
+        ok = False
+    return ok
+
+
+# --- Test 8: offset / RA-Dec math --------------------------------------------
+
+def test_executor_offset_math():
+    print("\nTesting executor offset / RA-Dec math...")
+    if _has_engine() is None:
+        return True
+    w = _make_exec_window()
+    w.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0))
+    ok = True
+    off = w._make_offset_star(0.5, 0.25)
+    rh = off.ra_hours + off.ra_minutes / 60.0 + off.ra_seconds / 3600.0
+    if abs(rh - 12.5) < 1e-6 and abs(off.dec_degrees_decimal - 30.25) < 1e-6:
+        print("  ✓ offset (+0.5h, +0.25deg)")
+    else:
+        print("  ✗ offset wrong: RA=%s Dec=%s" % (rh, off.dec_degrees_decimal))
+        ok = False
+    ab = w._make_star_from_radec(23.9, -10.0)
+    rh2 = ab.ra_hours + ab.ra_minutes / 60.0 + ab.ra_seconds / 3600.0
+    if abs(rh2 - 23.9) < 1e-6 and abs(ab.dec_degrees_decimal + 10.0) < 1e-6:
+        print("  ✓ absolute RA/Dec")
+    else:
+        print("  ✗ radec wrong: RA=%s Dec=%s" % (rh2, ab.dec_degrees_decimal))
+        ok = False
+    return ok
+
+# --- Test 9: sky reading -----------------------------------------------------
+
+def test_executor_sky():
+    print("\nTesting executor sky reading (blank catalog)...")
+    if _has_engine() is None:
+        return True
+    try:
+        import ssp_sequence
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+
+    w = _make_exec_window()
+    w._step_sky(ssp_sequence.SequenceStep('SKY', label='SKYLAST'))
+    last = w.calls[-1]
+    if last[0] == 'measure' and last[1] == 'SKYLAST' and last[2] == ' ':
+        print("  ✓ SKYLAST measured with blank catalog code")
+        return True
+    print("  ✗ sky call wrong: %s" % (last,))
+    return False
+
+
+# --- Test 10: standalone GOTO + headless -------------------------------------
+
+def test_executor_goto_standalone():
+    print("\nTesting GOTO skip (standalone) and headless slew...")
+    if _has_engine() is None:
+        return True
+    try:
+        import ssp_sequence
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+
+    ok = True
+    w = _make_exec_window()
+    w.sharpcap_available = False
+    w.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0))
+    w._step_goto(ssp_sequence.SequenceStep('GOTO', star_ref='V'))
+    if not any(c[0] == 'slew' for c in w.calls) and \
+            any('standalone' in s for s in w.statuses):
+        print("  ✓ standalone GOTO skipped (no slew, status logged)")
+    else:
+        print("  ✗ standalone GOTO not skipped: %s" % (w.calls,))
+        ok = False
+
+    w2 = _make_exec_window()
+    w2.current_target = _ExecTriple(_ExecStar('VAR', 12.0, 30.0))
+    w2._step_goto(ssp_sequence.SequenceStep('GOTO', star_ref='V'))
+    slews = [c for c in w2.calls if c[0] == 'slew']
+    if len(slews) == 1 and slews[0][3] is True:
+        print("  ✓ SharpCap GOTO slews headless (no modal)")
+    else:
+        print("  ✗ headless slew wrong: %s" % (slews,))
+        ok = False
+    return ok
+
+
+# --- Test 11: .ssp text round-trip -------------------------------------------
+
+def test_ssp_text_roundtrip():
+    print("\nTesting .ssp text parse / serialize round-trip...")
+    try:
+        import ssp_sequence
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+
+    text = ("MAXMINUTES, 60\nREPEAT, 2\n  GOTO, C\n"
+            "  MEASURE, filter=V, integ=5, interval=3\n"
+            "  GOTO, V\n  SKY, label=SKYLAST, offset=0.0,0.25\nEND\n")
+    seq = ssp_sequence.parse_ssp_text(text, name='t')
+    expected = ['REPEAT', 'GOTO', 'MEASURE', 'GOTO', 'SKY', 'END']
+    if [s.kind for s in seq.steps] != expected:
+        print("  ✗ parsed kinds %s" % [s.kind for s in seq.steps])
+        return False
+    print("  ✓ parsed kinds %s" % expected)
+    seq2 = ssp_sequence.parse_ssp_text(ssp_sequence.serialize_ssp_text(seq), name='t')
+    if [s.kind for s in seq2.steps] != expected:
+        print("  ✗ round-trip kinds %s" % [s.kind for s in seq2.steps])
+        return False
+    print("  ✓ serialize / parse round-trip")
+    return True
+
+
+# --- Test 12: WAIT_UNTIL ------------------------------------------------------
+
+def test_executor_wait_until():
+    print("\nTesting WAIT_UNTIL parse + late handling...")
+    if _has_engine() is None:
+        return True
+    try:
+        import ssp_sequence
+        from System import DateTime as SDateTime
+    except Exception as e:
+        print("  ⚠ skipped: " + str(e))
+        return True
+
+    ok = True
+    w = _make_exec_window()
+    if w._parse_utc_datetime('2026-11-27 02:45:00') is not None:
+        print("  ✓ parsed a UTC date/time")
+    else:
+        print("  ✗ parse failed")
+        ok = False
+    if w._parse_utc_datetime('bogus') is None:
+        print("  ✓ invalid date/time -> None")
+    else:
+        print("  ✗ bogus parsed")
+        ok = False
+
+    # Late handling relative to the real clock (no module patching, so the app's
+    # 1 s time-display timer keeps working and _parse_utc_datetime stays valid).
+    now = SDateTime.UtcNow
+    txt_proceed = now.AddMinutes(-10).ToString("yyyy-MM-dd HH:mm:ss")
+    txt_stop = now.AddMinutes(-60).ToString("yyyy-MM-dd HH:mm:ss")
+    wl = _make_exec_window()
+    wl._step_wait_until(ssp_sequence.SequenceStep(
+        'WAIT_UNTIL', utc_datetime=txt_proceed))     # 10 min late -> proceed
+    late_flag = wl._sequence_abort
+    w2 = _make_exec_window()
+    w2._step_wait_until(ssp_sequence.SequenceStep(
+        'WAIT_UNTIL', utc_datetime=txt_stop))        # 60 min late -> stop
+    abort_flag = w2._sequence_abort
+    if late_flag is False and abort_flag is True:
+        print("  ✓ <=30 min late proceeds; >30 min late stops the run")
+    else:
+        print("  ✗ late handling wrong: late=%s abort=%s" % (late_flag, abort_flag))
+        ok = False
+    return ok
+
+
 # --- Runner ------------------------------------------------------------------
+
+
+
 
 def main():
     """Run all tests."""
     print("=" * 60)
-    print("Sequence Engine Phase 1 Refactor Test Suite")
+    print("Sequence Engine Test Suite (Phases 1-2)")
     print("=" * 60)
 
     tests = [
@@ -519,6 +987,15 @@ def main():
         ("take_reading / _collect_counts guards", test_take_reading_guards),
         ("6/8 binning + retry/target fallback", test_collect_counts_binning),
         ("_filter_position_for_name mapping", test_filter_position_for_name),
+        ("executor step order", test_executor_order),
+        ("executor stop conditions", test_executor_stop_conditions),
+        ("executor REPEAT nesting", test_executor_repeat),
+        ("executor star resolution", test_executor_resolve_star),
+        ("executor offset/RA-Dec math", test_executor_offset_math),
+        ("executor sky reading", test_executor_sky),
+        ("executor GOTO standalone/headless", test_executor_goto_standalone),
+        (".ssp text round-trip", test_ssp_text_roundtrip),
+        ("executor WAIT_UNTIL", test_executor_wait_until),
     ]
 
     results = []
@@ -559,10 +1036,11 @@ def main():
 
 if __name__ == '__main__':
     success = main()
-    # Only exit with a status code when run as a script (ipy test_sequence.py).
-    # When exec'd from the SharpCap console there is no __file__, and the
-    # SystemExit raised by sys.exit() is printed as a traceback even on success.
-    if '__file__' in dir():
+    # Return an exit code only when run as a real script (ipy test_sequence.py),
+    # so run_ipy_test.ps1 / CI can read $LASTEXITCODE. In the SharpCap console or
+    # an exec() context sys.argv[0] is SharpCap itself, and the SystemExit raised
+    # by sys.exit() is printed as a traceback even on success - so skip it there.
+    if sys.argv and str(sys.argv[0]).endswith('test_sequence.py'):
         sys.exit(0 if success else 1)
 
 

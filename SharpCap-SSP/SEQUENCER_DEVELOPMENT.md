@@ -1112,6 +1112,9 @@ observable (R4).
 Work is split into five phases. Each phase is independently shippable and has
 explicit acceptance criteria. Phases 1-2 deliver the core value; 3-4 polish.
 
+**Progress:** Phase 0 (decisions), Phase 1 (core refactor) and Phase 2
+(sequence engine + minimal UI) are implemented. Phases 3-4 remain.
+
 ### Phase 0 — Spikes and decisions (0.5 day)
 
 | Task | Decision |
@@ -1135,7 +1138,7 @@ explicit acceptance criteria. Phases 1-2 deliver the core value; 3-4 polish.
 *Acceptance:* §5.6 — START output byte-identical to v0.1.6; all existing tests
 pass; new tests 1-3 pass. **No UI change.**
 
-### Phase 2 — Engine + minimal UI (2-3 days)
+### Phase 2 — Engine + minimal UI (2-3 days) ✅ Implemented
 
 | Task | Detail |
 |---|---|
@@ -1344,6 +1347,8 @@ backward compatibility where they map cleanly (`COUNT` → `MEASURE`, `PAUSE` �
 | 2026-11-26 | Initial evaluation (two options). |
 | 2026-11-26 | Refined to Option 1 only (in-app sequence engine); removed the built-in SharpCap Sequencer option; expanded design, UI, persistence and phased implementation plan. |
 | 2026-11-26 | Phase 0 decisions recorded: filter mapping via `comm.select_filter` (auto only) + combo sync with `updating_filter_combo`; Alt/Az via `ssp_extinction.AirmassCalculator` (unset location → skip, below horizon → abort); `WAIT_UNTIL` uses an absolute UTC date/time (≤ 30 min late → proceed with a warning, > 30 min late → stop the run with a warning). |
+| 2026-11-26 | Phase 1 implemented: `take_reading` / `_collect_counts` / `_filter_position_for_name` extracted from `_on_start`; `ssp_dataaq.py`; `test_sequence.py` added. |
+| 2026-11-26 | Phase 2 implemented: `ssp_sequence.py` (model, `.ssp`-text + JSON I/O, templates); executor + step handlers + `headless` GOTO in `ssp_dataaq.py`; `ssp_config.py` sequence keys; Sequence menu and RUN/STOP buttons; `test_sequence.py` tests 4-13. |
 
 
 

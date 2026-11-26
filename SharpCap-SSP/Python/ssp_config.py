@@ -47,7 +47,13 @@ class SSPConfig:
         'last_data_directory': '',
         'boot_delay': 5.0,  # Seconds to wait after opening COM port before sending SSSSSS
         'device_type': 'auto',  # 'auto', 'ssp3', 'ssp5a' - configurable device type
-        'detected_device_type': 'unknown'  # 'unknown', 'ssp3', 'ssp5a' - auto-detected
+        'detected_device_type': 'unknown',  # 'unknown', 'ssp3', 'ssp5a' - auto-detected
+        # --- Sequence automation (Phase 2) ---
+        'last_sequence_name': '',          # last used sequence
+        'sequence_max_minutes': 60,        # FR-2 default run length (minutes)
+        'sequence_max_observations': 0,    # 0 = unlimited (use minutes)
+        'sequence_repeat': 0,              # 0 = repeat until the length limit
+        'sequence_enable_run_button': 1    # show the RUN SEQ button
     }
     
     def __init__(self, config_dir=None):

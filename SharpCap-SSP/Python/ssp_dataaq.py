@@ -54,6 +54,7 @@ import ssp_comm
 import ssp_dialogs
 import night_mode
 import ssp_catalog
+import ssp_sequence
 
 
 class SSPDataAcquisitionWindow(Form):
@@ -146,6 +147,14 @@ class SSPDataAcquisitionWindow(Form):
         # _closing in take_reading and the count loop. Always False outside a
         # sequence run, so the manual START path is unaffected.
         self._sequence_abort = False
+        # Sequence engine state (Phase 2 - automated PEP runs)
+        self.sequence = None              # currently loaded PEPSequence (or None)
+        self._sequence = None             # the sequence being run
+        self._sequence_running = False
+        self._sequence_obs_count = 0
+        self._sequence_start = None
+        self._sequence_step_index = 0
+        self._sequence_steps_total = 0
         # Added for memory test (Phase 2) - cached bold Font for the target
         # label, created on first use and disposed in _on_form_closed
         self._target_label_font = None
@@ -216,7 +225,6 @@ class SSPDataAcquisitionWindow(Form):
         
         script_item = ToolStripMenuItem("Open Script File")
         script_item.Click += self._on_open_script
-        script_item.Enabled = False  # Disabled for now
         file_menu.DropDownItems.Add(script_item)
         
         file_menu.DropDownItems.Add(ToolStripSeparator())
@@ -298,6 +306,33 @@ class SSPDataAcquisitionWindow(Form):
         catalog_menu.DropDownItems.Add(reload_catalog_item)
         
         menu_strip.Items.Add(catalog_menu)
+        
+        # Sequence Menu (Phase 2 - automated PEP runs)
+        sequence_menu = ToolStripMenuItem("Sequence")
+        
+        run_seq_item = ToolStripMenuItem("Run Sequence")
+        run_seq_item.Click += self._on_run_sequence
+        sequence_menu.DropDownItems.Add(run_seq_item)
+        
+        stop_seq_item = ToolStripMenuItem("Stop Sequence")
+        stop_seq_item.Click += self._on_stop_sequence
+        sequence_menu.DropDownItems.Add(stop_seq_item)
+        
+        sequence_menu.DropDownItems.Add(ToolStripSeparator())
+        
+        load_tmpl_menu = ToolStripMenuItem("Load Template")
+        for tmpl_name in ssp_sequence.build_templates().keys():
+            tmpl_item = ToolStripMenuItem(tmpl_name)
+            tmpl_item.Click += (lambda sender, event, n=tmpl_name:
+                                self._on_load_template(n))
+            load_tmpl_menu.DropDownItems.Add(tmpl_item)
+        sequence_menu.DropDownItems.Add(load_tmpl_menu)
+        
+        export_seq_item = ToolStripMenuItem("Export Sequence...")
+        export_seq_item.Click += self._on_export_sequence
+        sequence_menu.DropDownItems.Add(export_seq_item)
+        
+        menu_strip.Items.Add(sequence_menu)
         
         self.MainMenuStrip = menu_strip
         self.Controls.Add(menu_strip)
@@ -595,6 +630,32 @@ class SSPDataAcquisitionWindow(Form):
             self.plate_solve_sync_checkbox.BringToFront()  # Raise AFTER Add - z-order requires it
         else:
             pass
+
+        # RUN SEQ / STOP buttons (Phase 2) - created in SharpCap and standalone
+        if self.config.get('sequence_enable_run_button', 1):
+            run_y = self.start_button.Location.Y
+            if self.sharpcap_available and hasattr(self, 'goto_stage_button'):
+                run_x = (self.goto_stage_button.Location.X +
+                         self.goto_stage_button.Size.Width + 10)
+            else:
+                run_x = (self.start_button.Location.X +
+                         self.start_button.Size.Width + 10)
+            self.run_seq_button = Button()
+            self.run_seq_button.Text = "RUN SEQ"
+            self.run_seq_button.Location = Point(run_x, run_y)
+            self.run_seq_button.Size = Size(100, 30)
+            self.run_seq_button.Click += self._on_run_sequence
+            self.Controls.Add(self.run_seq_button)
+            self.run_seq_button.BringToFront()  # Raise AFTER Add - z-order requires it
+
+            self.stop_seq_button = Button()
+            self.stop_seq_button.Text = "STOP"
+            self.stop_seq_button.Location = Point(run_x + 110, run_y)
+            self.stop_seq_button.Size = Size(80, 30)
+            self.stop_seq_button.Enabled = False
+            self.stop_seq_button.Click += self._on_stop_sequence
+            self.Controls.Add(self.stop_seq_button)
+            self.stop_seq_button.BringToFront()  # Raise AFTER Add - z-order requires it
     
     def _update_time_display(self, sender, event):
         """Update time display."""
@@ -1051,9 +1112,25 @@ class SSPDataAcquisitionWindow(Form):
             self._update_status("Data array cleared")
     
     def _on_open_script(self, sender, event):
-        """Handle Open Script File menu item."""
-        MessageBox.Show("Script functionality not yet implemented", "Open Script", 
-                       MessageBoxButtons.OK, MessageBoxIcon.Information)
+        """Load a .ssp-style sequence file (revives the legacy script menu)."""
+        dialog = OpenFileDialog()
+        dialog.Filter = ("SSP sequence files (*.ssp;*.txt)|*.ssp;*.txt|"
+                         "All files (*.*)|*.*")
+        dialog.Title = "Open Sequence File"
+        if dialog.ShowDialog(self) != DialogResult.OK:
+            return
+        try:
+            seq = ssp_sequence.load_ssp_text(dialog.FileName)
+        except Exception as e:
+            MessageBox.Show("Could not load sequence:\n" + str(e),
+                            "Open Sequence",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error)
+            return
+        self.sequence = seq
+        self.config.set('last_sequence_name', seq.name)
+        self.config.save()
+        self._update_status("Loaded sequence '%s' (%d steps)"
+                            % (seq.name, seq.get_count()))
     
     def _on_quit(self, sender, event):
         """Handle Quit menu item."""
@@ -2558,7 +2635,7 @@ class SSPDataAcquisitionWindow(Form):
         finally:
             self._set_goto_buttons_enabled(True)
     
-    def _slew_to_star(self, star, star_type):
+    def _slew_to_star(self, star, star_type, headless=False):
         """Slew the telescope to a star.
         
         Uses SharpCap mount control when a mount is connected, otherwise falls back
@@ -2567,6 +2644,8 @@ class SSPDataAcquisitionWindow(Form):
         Args:
             star: StarData object with the target coordinates
             star_type: Human-readable label for status messages (e.g. "Comparison")
+            headless: When True (sequence engine), suppress the modal manual-GOTO
+                      dialog and just report the copied coordinates (NFR-3)
         
         Returns:
             True if the slew (or manual fallback) was performed, else False
@@ -2644,7 +2723,14 @@ class SSPDataAcquisitionWindow(Form):
                 
                 # Copy coordinates to clipboard
                 Clipboard.SetText("%.6f, %.6f" % (ra_hours, dec_degrees))
-                
+
+                if headless:
+                    # Sequence run: no modal dialog; the coordinates are on the
+                    # clipboard and the step is treated as skipped (NFR-3)
+                    self._update_status("No mount: %s coordinates copied to clipboard"
+                                        % star.name)
+                    return False
+
                 MessageBox.Show(manual_msg, "Manual GOTO Required",
                               MessageBoxButtons.OK, MessageBoxIcon.Information)
                 
@@ -2882,6 +2968,465 @@ class SSPDataAcquisitionWindow(Form):
                     self.goto_stage_button.Text = new_text
         finally:
             self._set_goto_buttons_enabled(True)
+
+    # --- Sequence engine (Phase 2) -----------------------------------------
+
+    def _on_run_sequence(self, sender, event):
+        """Run the currently loaded sequence."""
+        seq = self.sequence
+        if seq is None:
+            MessageBox.Show("No sequence loaded. Use File -> Open Script File\n"
+                            "or Sequence -> Load Template first.",
+                            "Run Sequence", MessageBoxButtons.OK,
+                            MessageBoxIcon.Information)
+            return
+        if not self.comm.is_connected:
+            self._update_status("Error: connect to the SSP before running a sequence")
+            return
+        if self.current_target is None:
+            self._update_status("Note: no target selected - GOTO steps will be skipped")
+        # Apply the configured default run length if the sequence has none
+        if not seq.max_minutes and not seq.max_observations and not seq.repeat:
+            minutes = self.config.get('sequence_max_minutes', 60)
+            if minutes:
+                seq.max_minutes = float(minutes)
+        self.run_sequence(seq)
+
+    def _on_stop_sequence(self, sender, event):
+        """Request the running sequence to stop after the current step."""
+        if self._sequence_running:
+            self._sequence_abort = True
+            self._update_status("Stop requested - finishing current step...")
+        else:
+            self._update_status("No sequence is running")
+
+    def _on_load_template(self, template_name):
+        """Load one of the built-in templates into self.sequence."""
+        seq = ssp_sequence.build_templates().get(template_name)
+        if seq is None:
+            return
+        self.sequence = seq
+        self.config.set('last_sequence_name', seq.name)
+        self.config.save()
+        self._update_status("Loaded template '%s' (%d steps)"
+                            % (seq.name, seq.get_count()))
+
+    def _on_export_sequence(self, sender, event):
+        """Export the loaded sequence to a .ssp-style text file."""
+        if self.sequence is None:
+            self._update_status("No sequence to export")
+            return
+        dialog = SaveFileDialog()
+        dialog.Filter = "SSP sequence files (*.ssp)|*.ssp|All files (*.*)|*.*"
+        dialog.DefaultExt = "ssp"
+        dialog.Title = "Export Sequence"
+        if dialog.ShowDialog(self) != DialogResult.OK:
+            return
+        try:
+            ssp_sequence.save_ssp_text(self.sequence, dialog.FileName)
+            self._update_status("Exported sequence to " + dialog.FileName)
+        except Exception as e:
+            MessageBox.Show("Could not export sequence:\n" + str(e),
+                            "Export Sequence", MessageBoxButtons.OK,
+                            MessageBoxIcon.Error)
+
+    def run_sequence(self, sequence):
+        """Execute a PEPSequence on the UI thread, pumping between steps.
+
+        Runs full passes over the step list until a run-length limit
+        (max_minutes / max_observations), the optional pass cap (repeat), an
+        abort, or a disconnect stops it (FR-2, FR-8, FR-11).
+        """
+        if self._sequence_running:
+            return
+        if not self.comm.is_connected:
+            self._update_status("Error: connect to the SSP before running a sequence")
+            return
+        if self.current_target is None:
+            self._update_status("Note: no target selected - GOTO steps will be skipped")
+
+        self._sequence_running = True
+        self._sequence_abort = False
+        self._sequence_obs_count = 0
+        self._sequence = sequence
+        self._sequence_start = DateTime.UtcNow
+        self._sequence_step_index = 0
+        self._sequence_steps_total = sequence.get_count()
+        self._set_sequence_controls_running(True)
+        try:
+            self._update_status("Sequence '%s' started" % sequence.name)
+            print("Sequence '%s' started (%d steps)"
+                  % (sequence.name, self._sequence_steps_total))
+            passes = 0
+            repeat = sequence.repeat
+            if not repeat and not sequence.max_minutes and \
+                    not sequence.max_observations:
+                self._update_status("Sequence has no run-length limit; running one pass")
+                repeat = 1
+            while not self._sequence_should_stop(sequence):
+                self._run_step_list(sequence.steps, sequence)
+                passes += 1
+                if repeat and passes >= max(1, int(repeat)):
+                    break
+        finally:
+            self._sequence_running = False
+            self._sequence = None
+            self._set_sequence_controls_running(False)
+            self._update_status("Sequence finished - %d observations"
+                                % self._sequence_obs_count)
+            print("Sequence finished - %d observations" % self._sequence_obs_count)
+
+    def _sequence_should_stop(self, sequence):
+        """FR-2 / FR-8 / FR-11: minute/observation limit, abort, or comm loss."""
+        if self._closing or self._sequence_abort:
+            return True
+        if not self.comm.is_connected:
+            self._update_status("Sequence aborted: SSP disconnected")
+            return True
+        if sequence.max_observations and \
+                self._sequence_obs_count >= int(sequence.max_observations):
+            return True
+        if sequence.max_minutes and self._sequence_start is not None:
+            elapsed_min = (DateTime.UtcNow - self._sequence_start).TotalMinutes
+            if elapsed_min >= float(sequence.max_minutes):
+                return True
+        return False
+
+    def _run_step_list(self, steps, sequence):
+        """Dispatch each step; REPEAT recurses with its own stop check."""
+        i = 0
+        n = len(steps)
+        while i < n:
+            if self._sequence_should_stop(sequence):
+                return
+            step = steps[i]
+            self._sequence_step_index = i + 1
+            self._update_step_status(sequence, step)
+            kind = step.kind
+            try:
+                if kind == "GOTO":
+                    self._step_goto(step)
+                elif kind == "MEASURE":
+                    self._step_measure(step)
+                elif kind == "SKY":
+                    self._step_sky(step)
+                elif kind == "FILTER":
+                    self._step_filter(step)
+                elif kind == "WAIT":
+                    self._step_wait(step)
+                elif kind == "WAIT_UNTIL":
+                    self._step_wait_until(step)
+                elif kind == "ABORT_IF":
+                    if self._step_abort_if(step):
+                        self._sequence_abort = True
+                        return
+                elif kind == "REPEAT":
+                    end = self._find_matching_end(steps, i)
+                    count = int(step.params.get('count', 1) or 1)
+                    body = steps[i + 1:end]
+                    for _ in range(max(1, count)):
+                        if self._sequence_should_stop(sequence):
+                            return
+                        self._run_step_list(body, sequence)
+                    i = end
+                # END is consumed by REPEAT handling; a stray END is ignored
+            except Exception as exc:
+                # One failed step must not abort the whole run (FR-11)
+                import traceback
+                print("Sequence step error (%s): %s" % (kind, exc))
+                print(traceback.format_exc())
+                self._update_status("Step error (%s): %s" % (kind, exc))
+            i += 1
+
+    def _find_matching_end(self, steps, start_index):
+        """Return the index of the END matching the REPEAT at start_index."""
+        depth = 0
+        for j in range(start_index + 1, len(steps)):
+            kind = steps[j].kind
+            if kind == "REPEAT":
+                depth += 1
+            elif kind == "END":
+                if depth == 0:
+                    return j
+                depth -= 1
+        self._update_status("Warning: REPEAT without matching END")
+        return len(steps)
+
+    def _step_goto(self, step):
+        """Slew to a target star or offset position (headless - no modal)."""
+        star, label = self._resolve_step_star(step)
+        if star is None:
+            self._update_status("GOTO skipped: %s" % label)
+            return
+        ref = str(step.params.get('star_ref', 'V')).upper()
+        if ref in ('V', 'C', 'K'):
+            # Sync the Object/Catalog dropdowns (base items left untouched)
+            self._select_object_display(self._star_display_name(ref))
+        if not self.sharpcap_available:
+            self._update_status("GOTO skipped (standalone): %s" % label)
+            return
+        self._slew_to_star(star, label, headless=True)
+
+    def _step_measure(self, step):
+        """One PEP measurement; missing params inherit the current UI values."""
+        p = step.params
+        ok, _line = self.take_reading(
+            p.get('object', self.object_combo.Text),
+            p.get('catalog', self.catalog_combo.Text),
+            p.get('filter', self.filter_combo.Text),
+            p.get('gain', self.gain_combo.Text),
+            float(p.get('integ', self.integ_combo.Text)),
+            int(p.get('interval', self.interval_combo.Text)),
+            self.mode_combo.Text)
+        if ok:
+            self._sequence_obs_count += 1
+        else:
+            self._update_status("Measurement step failed; continuing")
+
+    def _step_sky(self, step):
+        """A sky reading (SKY/SKYNEXT/SKYLAST), optionally after an offset slew."""
+        p = step.params
+        label = str(p.get('label', 'SKYLAST'))
+        coord = dict((k, p[k]) for k in ('ra', 'dec', 'd_ra_h', 'd_dec_deg')
+                     if k in p)
+        if coord:
+            self._step_goto(ssp_sequence.SequenceStep('GOTO', star_ref='SKY', **coord))
+        ok, _line = self.take_reading(
+            label, " ",
+            p.get('filter', self.filter_combo.Text),
+            p.get('gain', self.gain_combo.Text),
+            float(p.get('integ', self.integ_combo.Text)),
+            int(p.get('interval', self.interval_combo.Text)),
+            self.mode_combo.Text)
+        if ok:
+            self._sequence_obs_count += 1
+
+    def _step_filter(self, step):
+        """Change the filter (combo + bar move in auto mode)."""
+        name = step.params.get('filter')
+        if name:
+            self._select_filter_by_name(name)
+
+    def _step_wait(self, step):
+        """Pause (pumping the UI so the camera frame queue drains)."""
+        ssp_comm.pump_sleep(float(step.params.get('seconds', 1) or 0))
+
+    def _step_wait_until(self, step):
+        """Wait until an absolute UTC date/time.
+
+        If the target is <= 30 minutes past, proceed immediately with a warning;
+        if more than 30 minutes past, stop the run with a warning.
+        """
+        target = self._parse_utc_datetime(step.params.get('utc_datetime'))
+        if target is None:
+            self._update_status("WAIT_UNTIL: invalid UTC datetime; skipping step")
+            return
+        while True:
+            if self._sequence is not None and \
+                    self._sequence_should_stop(self._sequence):
+                return
+            remaining = (target - DateTime.UtcNow).TotalSeconds
+            if remaining <= 0:
+                late_min = (-remaining) / 60.0
+                if late_min <= 30.0:
+                    self._update_status("WAIT_UNTIL: %.1f min late; proceeding"
+                                        % late_min)
+                    return
+                self._update_status("WAIT_UNTIL: >30 min late; stopping run")
+                self._sequence_abort = True
+                return
+            ssp_comm.pump_sleep(min(remaining, 5.0))
+
+    def _parse_utc_datetime(self, text):
+        """Parse 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DDTHH:MM:SSZ' as UTC.
+
+        Returns a UTC System.DateTime, or None if the string is missing or
+        malformed.
+        """
+        if not text:
+            return None
+        try:
+            s = str(text).strip().replace('T', ' ').rstrip('Z').strip()
+            date_part, time_part = s.split(' ')
+            y, mo, d = [int(x) for x in date_part.split('-')]
+            hms = time_part.split(':')
+            h = int(hms[0])
+            mi = int(hms[1])
+            sec = int(hms[2]) if len(hms) > 2 else 0
+            return DateTime(y, mo, d, h, mi, sec, System.DateTimeKind.Utc)
+        except Exception:
+            return None
+
+    def _step_abort_if(self, step):
+        """Return True if the run should stop (below horizon / over airmass)."""
+        if not (self.current_target and self.current_target.variable):
+            return False
+        alt_below = step.params.get('alt_below')
+        airmass_above = step.params.get('airmass_above')
+        if alt_below is None and airmass_above is None:
+            return False
+        has_loc, alt, airmass = self._current_alt_airmass(self.current_target.variable)
+        if not has_loc:
+            self._update_status("ABORT_IF skipped: observer location not set")
+            return False
+        if alt is None:                       # below horizon
+            self._update_status("ABORT_IF: target below horizon")
+            return True
+        if alt_below is not None and alt < float(alt_below):
+            self._update_status("ABORT_IF: target below altitude %s" % alt_below)
+            return True
+        if (airmass_above is not None and airmass is not None and
+                airmass > float(airmass_above)):
+            self._update_status("ABORT_IF: airmass above %s" % airmass_above)
+            return True
+        return False
+
+    def _resolve_step_star(self, step):
+        """Return (StarData, label) for a GOTO/SKY step, or (None, reason)."""
+        p = step.params
+        ref = str(p.get('star_ref', 'V')).upper()
+        if ref == 'V':
+            v = self.current_target.variable if self.current_target else None
+            return (v, "Variable") if v else (None, "no target selected")
+        if ref == 'C':
+            c = self.current_target.comparison if self.current_target else None
+            return (c, "Comparison") if c else (None, "no comparison star")
+        if ref == 'K':
+            k = self.current_target.check if self.current_target else None
+            return (k, "Check") if k else (None, "no check star")
+        if (ref in ('SKY', 'OFFSET') or 'ra' in p or 'd_ra_h' in p or
+                'd_dec_deg' in p):
+            if 'ra' in p and 'dec' in p:
+                star = self._make_star_from_radec(p['ra'], p['dec'])
+            else:
+                star = self._make_offset_star(float(p.get('d_ra_h', 0.0)),
+                                              float(p.get('d_dec_deg', 0.0)))
+            return (star, "Sky offset") if star else (None, "no target for offset")
+        return (None, "unknown star_ref %r" % ref)
+
+    def _make_offset_star(self, d_ra_h, d_dec_deg, name="SKY-OFF"):
+        """Pseudo StarData offset from the current target's variable star.
+
+        Small offsets only: the delta is applied directly to RA hours and Dec
+        degrees (precession/refraction ignored) - adequate for a sky patch a few
+        tenths of a degree to a few degrees from the target. Returns None if no
+        target is selected.
+        """
+        if not (self.current_target and self.current_target.variable):
+            return None
+        v = self.current_target.variable
+        ra_h = (v.ra_hours + v.ra_minutes / 60.0 + v.ra_seconds / 3600.0 +
+                d_ra_h) % 24.0
+        dec = v.dec_degrees_decimal + d_dec_deg
+        rh = int(ra_h)
+        rm = int((ra_h - rh) * 60.0)
+        rs = (((ra_h - rh) * 60.0) - rm) * 60.0
+        sign = 1 if dec >= 0 else -1
+        da = abs(dec)
+        dd = int(da) * sign
+        dm = int((da - abs(dd)) * 60.0)
+        ds = (((da - abs(dd)) * 60.0) - dm) * 60.0
+        return ssp_catalog.StarData(name=name, ra_hours=rh, ra_minutes=rm,
+                                    ra_seconds=rs, dec_degrees=dd,
+                                    dec_minutes=dm, dec_seconds=ds)
+
+    def _make_star_from_radec(self, ra, dec, name="SKY-ABS"):
+        """Pseudo StarData from explicit RA (hours) and Dec (degrees)."""
+        ra = float(ra) % 24.0
+        dec = float(dec)
+        rh = int(ra)
+        rm = int((ra - rh) * 60.0)
+        rs = (((ra - rh) * 60.0) - rm) * 60.0
+        sign = 1 if dec >= 0 else -1
+        da = abs(dec)
+        dd = int(da) * sign
+        dm = int((da - abs(dd)) * 60.0)
+        ds = (((da - abs(dd)) * 60.0) - dm) * 60.0
+        return ssp_catalog.StarData(name=name, ra_hours=rh, ra_minutes=rm,
+                                    ra_seconds=rs, dec_degrees=dd,
+                                    dec_minutes=dm, dec_seconds=ds)
+
+    def _current_alt_airmass(self, star):
+        """Return (has_location, alt, airmass) via ssp_extinction.AirmassCalculator.
+
+        has_location is False when the observer location is unset (0,0); when it
+        is set, alt/airmass are None if the target is below the horizon.
+        """
+        try:
+            lat = self.config.get('observer_latitude', 0.0)
+            lon = self.config.get('observer_longitude', 0.0)
+            if not lat and not lon:
+                return (False, None, None)
+            import ssp_extinction
+            from datetime import datetime, timezone
+            calc = ssp_extinction.AirmassCalculator(lat, lon)
+            now = datetime.now(timezone.utc)
+            ra_deg = (star.ra_hours + star.ra_minutes / 60.0 +
+                      star.ra_seconds / 3600.0) * 15.0
+            dec_deg = star.dec_degrees_decimal
+            alt, _azimuth = calc.calculate_altaz(ra_deg, dec_deg, now)
+            airmass = calc.calculate_airmass(ra_deg, dec_deg, now)
+            return (True, alt, airmass)
+        except Exception as exc:
+            print("ABORT_IF alt/airmass error: %s" % exc)
+            return (False, None, None)
+
+    def _select_filter_by_name(self, filter_name):
+        """Set the filter combo (suppressing its event) and move the bar in auto."""
+        if not filter_name:
+            return
+        self.updating_filter_combo = True
+        try:
+            for i in range(self.filter_combo.Items.Count):
+                if str(self.filter_combo.Items[i]) == str(filter_name):
+                    self.filter_combo.SelectedIndex = i
+                    break
+        finally:
+            self.updating_filter_combo = False
+        auto_manual = self.config.get('auto_manual', 'M')
+        if auto_manual == 'A' and str(filter_name).lower() != "home":
+            position = self._filter_position_for_name(filter_name)
+            if position is not None and 1 <= position <= 6 and self.comm.is_connected:
+                ok, _retry, msg = self.comm.select_filter(position)
+                if ok:
+                    self._update_status("Filter %s is in position" % filter_name)
+                else:
+                    self._update_status("Warning: filter not confirmed - " + msg)
+
+    def _update_step_status(self, sequence, step):
+        """Short progress line in the status box."""
+        try:
+            total_min = 0.0
+            if self._sequence_start is not None:
+                total_min = (DateTime.UtcNow - self._sequence_start).TotalMinutes
+            obs = self._sequence_obs_count
+            if sequence.max_observations:
+                obs_str = "obs %d/%d" % (obs, int(sequence.max_observations))
+            else:
+                obs_str = "obs %d" % obs
+            self._update_status("Seq '%s' step %d/%d - %s - %.1f min"
+                                % (sequence.name, self._sequence_step_index,
+                                   self._sequence_steps_total, obs_str, total_min))
+        except Exception:
+            pass
+
+    def _set_sequence_controls_running(self, running):
+        """Lock START/GOTO/RUN during a run; toggle STOP."""
+        try:
+            if hasattr(self, 'start_button'):
+                self.start_button.Enabled = not running
+            if hasattr(self, 'run_seq_button'):
+                self.run_seq_button.Enabled = not running
+            if hasattr(self, 'stop_seq_button'):
+                self.stop_seq_button.Enabled = running
+            if hasattr(self, 'goto_button'):
+                self.goto_button.Enabled = (not running) and bool(self.current_target)
+            if hasattr(self, 'goto_stage_button'):
+                has_comp = bool(self.current_target and
+                                self.current_target.comparison)
+                self.goto_stage_button.Enabled = (not running) and has_comp
+        except Exception:
+            pass
 
 
 class StarSelectionDialog(Form):

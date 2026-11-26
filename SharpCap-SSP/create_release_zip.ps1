@@ -8,6 +8,7 @@ $files = @(
     "Python\ssp_dialogs.py",
     "Python\ssp_catalog.py",
     "Python\ssp_extinction.py",
+    "Python\ssp_sequence.py",
     "Python\ssp_allsky.py",
     "Python\ssp_location_utils.py",
     "Python\night_mode.py",
