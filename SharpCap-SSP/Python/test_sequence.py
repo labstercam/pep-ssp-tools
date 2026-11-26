@@ -154,11 +154,14 @@ class _FakeDT(object):
 
 
 class _FakeDTClass(object):
-    """Replacement for System.DateTime: UtcNow is a fixed 2026-01-02 03:04:05."""
+    """Replacement for System.DateTime; UtcNow is a fixed 2026-01-02 03:04:05."""
 
-    @staticmethod
-    def UtcNow():
-        return _FakeDT(2026, 1, 2, 3, 4, 5)
+
+# The application reads `DateTime.UtcNow` as a .NET property (no parentheses), so
+# expose it as a plain attribute holding a fixed instance. A @staticmethod would
+# stay a function object here and fail with "'function' object has no attribute
+# 'AddSeconds'".
+_FakeDTClass.UtcNow = _FakeDT(2026, 1, 2, 3, 4, 5)
 
 
 # The default filter bars used by the app (ssp_config.DEFAULT_CONFIG)
@@ -556,7 +559,11 @@ def main():
 
 if __name__ == '__main__':
     success = main()
-    sys.exit(0 if success else 1)
+    # Only exit with a status code when run as a script (ipy test_sequence.py).
+    # When exec'd from the SharpCap console there is no __file__, and the
+    # SystemExit raised by sys.exit() is printed as a traceback even on success.
+    if '__file__' in dir():
+        sys.exit(0 if success else 1)
 
 
 
