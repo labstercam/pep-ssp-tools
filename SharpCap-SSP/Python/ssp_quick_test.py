@@ -6,7 +6,7 @@ Quick interactive test for SSP photometer connection.
 Can be run from SharpCap IronPython console or standalone.
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr

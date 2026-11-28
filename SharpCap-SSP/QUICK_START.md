@@ -1,7 +1,10 @@
 # SharpCap-SSP Quick Start Guide
 
 ## Overview
-SharpCap-SSP provides SSP photometer control for use with SharpCap or standalone. This guide will get you collecting photometry data in 5 minutes.
+SharpCap-SSP provides SSP photometer control for use with SharpCap or standalone.
+This guide will get you collecting photometry data in 5 minutes. It covers manual
+data collection, telescope **GOTO + plate-solve/sync**, and **automated sequence runs**
+(Var/Comp/Check/Sky) with silent autosave.
 
 ---
 
@@ -15,7 +18,7 @@ SharpCap-SSP provides SSP photometer control for use with SharpCap or standalone
 - ✅ Serial cable connected to PC
 
 **One-Time Setup:**
-1. Download the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.6
+1. Download the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.2.0
 2. Unzip the contents. Recommend to your \Documents\Sharp\SSP:
    ```
    C:\Users\YourName\Documents\SharpCap\SSP
@@ -54,7 +57,7 @@ Done! All dependencies are included.
 
 **One-Time Setup:**
 1. Download and install IronPython 3.4: https://github.com/IronLanguages/ironpython3/releases
-2. Download and unzip the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.6, recommend unzip to \Documents\Sharp\SSP
+2. Download and unzip the latest release zip file from https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.2.0, recommend unzip to \Documents\Sharp\SSP
 3. Navigate to that folder in File Explorer
 4. Right-click `install.ps1` and select **"Run with PowerShell"**
 5. Double-click `Create_Desktop_Shortcut.bat` to create a desktop icon
@@ -230,6 +233,9 @@ DATE       TIME     C    OBJECT          F  COUNT  COUNT  COUNT  COUNT  IT GN NO
 - Telescope and observer names persist in config
 - Conditions remembered for next session
 - Comments field populated from notes (double-click feature)
+- **Every reading is also autosaved silently** (no dialog) to a per-target
+  `YYMMDD-HHMMSS-<target>.raw` + `.tab`, so data is never lost even if you don't
+  press Save Data. These land in the same folder as your last manual save.
 
 This file can be:
 - Opened in SSPDataq Reduction module
@@ -286,6 +292,140 @@ Repeat steps 2-4
 File → Save Data
 Filename: V1234_20250110.raw
 ```
+
+---
+
+### Automated Sequence Runs
+
+Run a Var→Comp cycle (or any custom pattern) automatically instead of pressing
+START for each star.
+
+**Build a sequence — two ways:**
+- **Editor:** `Sequence → Edit Sequence…` — load a template, add/reorder steps, set
+  the run length, and **Save As**. Stored in `Documents\SharpCap\SSP\sequences\*.json`.
+  The **Sequence:** box holds the name (type a new one to save a copy); the help panel
+  under the step fields shows the **syntax and "what it does"** of the selected command.
+- **Text file:** write a `.ssp` file and load it with `File → Open Script File`
+  (`Sequence → Export Sequence…` writes the current sequence back out as `.ssp`).
+
+Load a previously saved sequence at any time with **`Sequence → Load Sequence…`** —
+pick from the list of saved sequences and built-in templates and it becomes the
+current sequence (ready for **RUN SEQ**).
+
+**Run it**
+1. Prepare — connect, set gain/integration/interval, and select the target
+   (`Catalog → Select Target Star`). Tick **Plate Solve and Sync** to re-solve each GOTO.
+2. Load a sequence (above).
+3. Set the run length (editor): **Max minutes** and/or **Max observations**;
+   **Repeat** caps whole passes (0 = until the limit). Empty = a single pass.
+4. Run — click **RUN SEQ** on the main window (or **Run** in the editor). **STOP**
+   aborts after the current step. **PAUSE** finishes the current step and holds the
+   run (the button then reads **RESUME**); while paused the manual SSP controls
+   (**GOTO**, filter, integration, **START**, …) are unlocked so you can operate
+   SharpCap, then press **RESUME** to carry on.
+5. Every reading is **autosaved silently** (no prompts) to a per-target
+   `YYMMDD-HHMMSS-<target>.raw` + `.tab` in your last data folder.
+
+#### Sequencer command reference
+
+Commands are one per line, `COMMAND, value` (comma-separated). `#` starts a comment;
+blank lines are ignored. In `MEASURE`/`SKY`, any omitted field inherits the current
+main-window setting. Unknown commands are rejected when the file loads.
+
+| Command | Syntax | What it does |
+|---|---|---|
+| `MAXMINUTES` | `MAXMINUTES, 60` | Stop the run after 60 wall-clock minutes. |
+| `MAXOBS` | `MAXOBS, 50` | Stop the run after 50 completed measurements. |
+| `REPEAT` / `END` | `REPEAT, 6` … `END` | Repeat the enclosed block 6 times. |
+| `GOTO` | `GOTO, V` / `GOTO, C` / `GOTO, K` | Slew to the target's Variable / Comparison / Check star. |
+| `GOTO` | `GOTO, RA,Dec` | Slew to absolute coordinates: RA in decimal **hours**, Dec in decimal **degrees**, e.g. `GOTO, 12.5,-30.25`. |
+| `GOTO` | `GOTO, offset=0.0,0.25` | Slew to an offset from the target's variable star. |
+| `GOTO` | `GOTO, V, offset=0.0,0.25` | Slew to the V/C/K star **plus** an RA/Dec offset (`dRA` in hours, `dDec` in degrees). |
+| `TARGET` | `TARGET, OMI CET` | Load a new catalog object **by name** and its Var / Comp / Check stars for all following steps. |
+| `TARGET` | `TARGET, auid=000-BBW-425` | Load a new catalog object **by AUID** (add `, id=auid` / `id=name` to force the field explicitly). |
+| `MEASURE` | `MEASURE, filter=V, integ=5, interval=3, gain=10` | One PEP measurement (every parameter is optional). |
+| `SKY` | `SKY, label=SKYLAST, filter=V` | A sky reading; `label` is `SKY`, `SKYNEXT` or `SKYLAST`. |
+| `SKY` | `SKY, label=SKYLAST, offset=0.0,0.25` | Sky reading taken after slewing to an RA/Dec offset. |
+| `GOTO` / `SKY` | `GOTO, V, offset=0.0,0.25, plate_solve=0` | Add `plate_solve=0` to **skip** the plate-solve/sync for that step (a fast offset/sky slew); `plate_solve=1` forces it on. |
+| `FILTER` | `FILTER, B` | Change filter (auto mode moves the slider; manual mode just records). |
+| `WAIT` | `WAIT, 30` | Pause 30 seconds (the UI keeps running). |
+| `WAIT_UNTIL` | `WAIT_UNTIL, 2026-11-27 02:45:00` | Wait until that absolute **UTC** date/time. |
+| `ABORT_IF` | `ABORT_IF, airmass_above=2.5` | Stop the run if the target is above that airmass (or `alt_below=15`). |
+
+**Field reference**
+
+| Field | Applies to | Meaning |
+|---|---|---|
+| `filter=` | MEASURE, SKY | Filter name on the active bar (`V`, `B`, `u`, ...). |
+| `gain=` | MEASURE, SKY | `1`, `10` or `100`. |
+| `integ=` | MEASURE, SKY | Integration time in **seconds** (`5`, `10`). |
+| `interval=` | MEASURE, SKY | Number of counts (1-8; 6/8 are binned to 3/4). |
+| `object=` / `catalog=` | MEASURE, SKY | Override the data-line object name / catalog code. |
+| `label=` | SKY | `SKY` / `SKYNEXT` / `SKYLAST`. |
+| `offset=dRA,dDec` | GOTO, SKY | RA/Dec offset (RA in **hours**, Dec in **degrees**). For GOTO it is applied **on top of** the target star/coords; for SKY it is the sky-read position. |
+| `plate_solve=0` / `plate_solve=1` | GOTO, SKY | Per-step override of the **Plate Solve and Sync** checkbox: `0` skips the solve for this slew, `1` forces it on. Leave it out to use the checkbox. |
+| `id=name` / `id=auid` | TARGET | Force which catalog field the identifier matches (default: try the name first, then the AUID). |
+| `alt_below=` / `airmass_above=` | ABORT_IF | Stop thresholds (below altitude / above airmass). |
+
+**Notes**
+
+- `WAIT_UNTIL` uses UTC only: if the time is **<= 30 min** in the past it proceeds with
+  a warning; if it is **> 30 min** in the past it stops the run with a warning.
+- `ABORT_IF` is skipped when the observer location is not set (0,0); a target below the
+  horizon always stops the run.
+- `GOTO V/C/K` needs a target selected (`Catalog → Select Target Star`); a missing star
+  (e.g. no Check star) simply skips that step.
+- `TARGET` loads a new catalog object and its Var / Comp / Check triple **during** the
+  run; the following `GOTO V/C/K`, the `MEASURE`/`SKY` defaults and `ABORT_IF` then use the
+  new target. Objects are given by name or AUID (`auid=...`). Unknown objects are checked
+  the moment a `TARGET` step is **added or edited** in the sequence editor (a popup warns
+  if the object is not found), when a sequence is **loaded** (a warning lists any unknown
+  objects) and again when a run **starts** (a warning with a **10-second countdown** you
+  can cancel — the run does not begin until the countdown ends). If an object is still
+  missing at run time the `TARGET` step is skipped silently.
+
+**Legacy SSPDataq aliases** (accepted for compatibility): `COUNT` -> `MEASURE`;
+`PAUSE, n` -> `WAIT, n`; `TELESCOPE, RA,Dec` -> `GOTO, RA,Dec`; `OBJECT`, `GAIN`,
+`INTEG` and `INTERVAL` set defaults for the following `COUNT` steps; `LOAD`,
+`LOADCATALOG` and `MIRROR` are accepted and ignored.
+
+**Editor field mapping** (the same commands, entered in the dialog): `GOTO` -> **Value**
+(`V`/`C`/`K`, or `RA,Dec`), plus optional **Params**
+(`plate_solve=0`); an RA/Dec offset is written `offset=dRA,dDec` (the same syntax
+`SKY` uses) — enter it in **Params** and it is applied **on top of** **Value**, e.g.
+**Value** `V` plus **Params** `offset=0,0.25` slews to the variable star **plus** the
+offset. `TARGET` -> **Value** (object name or AUID; may be `auid=...`), plus
+optional **Params** (`id=auid`); `MEASURE` -> **Params**;
+`SKY` -> **Label** + **Params**; `FILTER` -> **Value**; `WAIT` -> **Value** (seconds);
+`WAIT_UNTIL` -> **Value** (datetime); `ABORT_IF` -> **Params**; `REPEAT` -> **Value** (count).
+
+**Example** — V-C-V-C with a sky-last bookend, 60 minutes:
+
+```
+# V-C-V-C with a sky-last reading; run for 60 minutes
+MAXMINUTES, 60
+SKY, label=SKYLAST, filter=V
+GOTO, C
+MEASURE, filter=V, integ=5, interval=3
+GOTO, V
+MEASURE, filter=V, integ=5, interval=3
+GOTO, C
+MEASURE, filter=V, integ=5, interval=3
+```
+
+**Example** — two targets in one run, with an offset sky reading:
+
+```
+TARGET, OMI CET
+GOTO, V, offset=0,0.05
+MEASURE, filter=V, integ=5, interval=3
+SKY, label=SKYLAST, offset=0,0.25
+TARGET, auid=000-BBW-425
+GOTO, V
+MEASURE, filter=V, integ=5, interval=3
+```
+
+
 
 ---
 
@@ -350,6 +490,24 @@ Filename: Extinction_20250110.raw
 ---
 
 ## Advanced Features
+
+### Telescope GOTO & Plate Solving
+- `Catalog → Select Target Star` loads the target's **Var / Comp / Check** stars.
+- A sequence `TARGET, <name or AUID>` step can load a new catalog object (and its
+  **Var / Comp / Check** stars) part-way through a run — e.g. to observe several
+  objects in one automated session.
+- **GOTO Selected Star** slews to whichever star is chosen in the Object dropdown.
+- The two-stage button slews **Comp → Var → Comp** (toggles each press).
+- Tick **Plate Solve and Sync** (on the target row) to re-solve and sync the mount
+  after each slew.
+- Without a connected mount, GOTO copies the coordinates to the clipboard for the
+  SharpCap Push-To Assistant.
+
+### Automated Sequences & Autosave
+- Build and run automatic PEP runs from the **Sequence** menu and the **RUN SEQ**
+  button — see *Automated Sequence Runs* under *Typical Observation Workflow*.
+- Every reading is **autosaved silently** to a per-target `YYMMDD-HHMMSS-<target>.raw`
+  + `.tab` (no prompts, never blocks the run).
 
 ### Night Mode
 - **Setup → Night/Day Screen**
@@ -432,6 +590,48 @@ MM-DD-YYYY HH:MM:SS C OBJECTNAME F XXXXX XXXXX XXXXX XXXXX II GG
 - **M** = Moving (asteroids, comets)
 - **T** = Trans (transformation)
 - **Q** = Q'check (quality check)
+
+### `.tab` Format (for the PEP Analysis Workbook)
+
+Alongside every `.raw`, SharpCap-SSP writes a **tab-separated `.tab` file** with a
+column order chosen so it can be **cut and pasted straight into the PEP analysis
+workbook** (no "text to columns" step needed). It is written both by `File → Save Data`
+and by the **silent autosave** (so it is always up to date during a run).
+
+**Header** — 4 lines; from line 4 the columns are separated by a TAB character:
+
+```
+ FILENAME=<file>.TAB       RAW OUTPUT DATA FROM SSP DATA ACQUISITION PROGRAM
+ UT DATE= MM/DD/YYYY   TELESCOPE= [name]      OBSERVER= [name]
+ CONDITIONS= [conditions]
+CAT  OBJECT  F  MO-DY-YEAR  UT  COUNT1  COUNT2  COUNT3  COUNT4  INT  SCLE  COMMENTS
+```
+
+**Data rows** — one per reading (TAB-separated):
+
+| # | Column | Example | Meaning |
+|---|---|---|---|
+| 1 | CAT | `V` | Catalog code (`A`/`F`/`C`/`V`/…) |
+| 2 | OBJECT | `HD 12345` | Star name (12 chars max) |
+| 3 | F | `V` | Filter |
+| 4 | MO-DY-YEAR | `12-10-2025` | UT date |
+| 5 | UT | `03:45:23` | UT time (mid-point corrected) |
+| 6-9 | COUNT1..COUNT4 | `12543` | The 3-4 counts (blank when unused) |
+| 10 | INT | `5` | Integration time (seconds) |
+| 11 | SCLE | `10` | Scale = gain |
+| 12 | COMMENTS | `good seeing` | Optional — only present if you added a note (double-click) |
+
+**How to get it into the PEP analysis workbook**
+
+1. Open the `.tab` file in **Excel** — it opens straight into columns (or open it in
+   Notepad and paste into Excel; the tabs land each value in its own cell).
+2. The 4 header lines occupy the first rows; select from the **first data row**
+   (the one beginning with the catalog code) downwards.
+3. **Copy** those rows and **paste** them into the PEP analysis workbook's input sheet
+   — the `.tab` column order (CAT, OBJECT, F, date, UT, counts, INT, SCLE, COMMENTS)
+   matches the SSPDataq/PEP layout the workbook expects.
+4. Because the file is **appended live** during the run, you can paste mid-run or wait
+   until the sequence finishes and paste the whole set at once.
 
 ---
 
@@ -659,20 +859,33 @@ The Coefficients menu provides tools for managing zero-point and standard error 
 ---
 
 ## What's Not Implemented (Yet)
-- ⏸️ Fast mode (coming soon)
-- ⏸️ Very fast mode (SSP-5 only)
-- ⏸️ Automatic filter bar control
-- ⏸️ Catalog loading from files
-- ⏸️ Script automation (.ssp files)
-- ⏸️ Telescope control/slewing
-- ⏸️ Built-in data reduction
-- ⏸️ Plotting/visualization
+- ⏸️ Fast mode (100-5000 rapid readings)
+- ⏸️ Very fast mode (SSP-5 only, 20 ms integrations)
+- ⏸️ Loading *additional* star catalogs (the built-in PEP target catalog and the
+  first-order extinction catalog are included)
+- ⏸️ Built-in data reduction / magnitude calculation (use the All Sky tool plus your
+  PEP processing spreadsheet)
+- ⏸️ General plotting beyond the All Sky calibration scatter plot
 
-**Current Version: Fully functional for slow mode manual photometry**
+**Implemented (v0.2.0):** serial comms; slow + trial modes; 6/8-interval binning;
+`.raw` + `.tab` export and silent autosave; star catalog; first-order extinction
+selection; telescope **GOTO with plate-solve/sync**; **automated sequence runs**
+(`.ssp`/JSON, editor, run length, sky/offset steps); dockable window; night mode;
+All Sky calibration; memory-safe long sessions.
 
 ---
 
 ## Version History
+- **0.2.0** (2026-11-26) - Automated Sequence Runs
+  - New sequence engine (`ssp_sequence.py`) + executor: GOTO / MEASURE / SKY /
+    FILTER / WAIT / WAIT_UNTIL / ABORT_IF / REPEAT steps
+  - Run length by minutes or observations; STOP aborts cleanly
+  - `Sequence → Edit Sequence…` editor (add/reorder steps, save/load named
+    sequences, templates), `Load Template`, `Export Sequence…`, and
+    `File → Open Script File` (`.ssp`)
+  - Headless GOTO / measure (no modal dialogs mid-run)
+  - Fixed: gain is coerced to int (sequence MEASURE steps inherited a string gain)
+  - `test_sequence.py` regression suite (16 tests)
 - **0.1.6** (2026-11-25) - Memory Leak Fix for Long Sessions
   - Fixed `OutOfMemoryException` / crash after ~100 readings when a guide camera was running
   - SSP waits now pump the UI message loop instead of blocking it, so camera frames are
@@ -733,7 +946,9 @@ The Coefficients menu provides tools for managing zero-point and standard error 
 │ INTEG:   1/5/10 seconds                 │
 │ MODE:    trial (test) / slow (science)  │
 │ START:   Click when ready               │
-│ SAVE:    File → Save Data               │
+│ GOTO:    GOTO Selected Star / GOTO Comp │
+│ SEQ:     Sequence menu / RUN SEQ        │
+│ SAVE:    File → Save Data (auto-saved)  │
 │ CLEAR:   File → Clear Data              │
 │ EXIT:    File → Quit                    │
 └─────────────────────────────────────────┘

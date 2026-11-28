@@ -6,7 +6,7 @@ Main entry point for SharpCap-SSP photometer control tool.
 Provides integration between Optec SSP photometers and SharpCap software.
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 Date: September 2026
 """
 
@@ -91,7 +91,7 @@ class SSPMainWindow(Form):
     
     def __init__(self):
         """Initialize the main window."""
-        self.Text = "SharpCap-SSP Photometer Control v0.1.6"
+        self.Text = "SharpCap-SSP Photometer Control v0.2.0"
         self.Width = 720
         self.Height = 525
         self.StartPosition = FormStartPosition.CenterScreen
@@ -137,13 +137,14 @@ class SSPMainWindow(Form):
         description_text += "  * Multiple data acquisition modes (Slow, Fast, Very Fast)\r\n"
         description_text += "  * Automated and manual filter bar control (SSP-5a)\r\n"
         description_text += "  * Star catalog integration with GOTO support\r\n"
+        description_text += "  * Automated sequence runs (Var/Comp/Sky, .ssp scripts)\r\n"
         description_text += "  * First order extinction star selection with airmass filtering\r\n"
         description_text += "  * Real-time Alt/Az display for visible targets\r\n"
         description_text += "  * Real-time photometric data collection\r\n"
         description_text += "  * Configuration compatible with SSPDataq\r\n"
         description_text += "  * Night mode UI for dark adaptation\r\n"
         description_text += "  * Output in standard .raw format\r\n\r\n"
-        description_text += "VERSION: v0.1.6 (Alpha)\r\n"
+        description_text += "VERSION: v0.2.0 (Alpha)\r\n"
         description_text += "Development Status: Core functionality implemented\r\n\r\n"
         description_text += "For documentation, see:\r\n"
         description_text += "../SSPDataq/Analysis/SSPDataq_Software_Overview.md"
@@ -249,7 +250,7 @@ class SSPMainWindow(Form):
         
         # Footer label
         footer_label = Label()
-        footer_label.Text = "Part of the pep-ssp-tools project | v0.1.6 Alpha"
+        footer_label.Text = "Part of the pep-ssp-tools project | v0.2.0 Alpha"
         footer_label.Location = Point(10, 460)
         footer_label.Size = Size(680, 20)
         footer_label.TextAlign = ContentAlignment.MiddleCenter
@@ -325,7 +326,7 @@ class SSPMainWindow(Form):
 def launch_ssp_photometer():
     """Main entry point for SharpCap-SSP."""
     print("=" * 60)
-    print("SharpCap-SSP Photometer Control v0.1.6")
+    print("SharpCap-SSP Photometer Control v0.2.0")
     print("=" * 60)
     print("")
     

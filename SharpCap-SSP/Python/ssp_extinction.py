@@ -1,7 +1,7 @@
 """
 First Order Extinction Module for SharpCap-SSP
 Provides star catalog and airmass calculations for extinction observations.
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import csv

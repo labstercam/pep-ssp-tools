@@ -1,4 +1,4 @@
-# Create release ZIP for SharpCap-SSP v0.1.6
+# Create release ZIP for SharpCap-SSP v0.2.0
 
 $files = @(
     "Python\main.py",
@@ -24,6 +24,7 @@ $files = @(
     "Python\first_order_extinction_stars.csv",
     "Python\verify_optimization.py",
     "Python\test_memory_optimization.py",
+    "Python\test_sequence.py",
     "Python\ssp_quick_test.py",
     "Python\ssp_test_serial.py",
     "Python\System.IO.Ports.dll",
@@ -33,10 +34,11 @@ $files = @(
     "OPTIMIZATION_SUMMARY.md",
     "BUG_FIXES.md",
     "MEMORY_ANALYSIS.md",
-    "DOCKING.md"
+    "DOCKING.md",
+    "SEQUENCER_DEVELOPMENT.md"
 )
 
-$zipPath = "SharpCap-SSP-v0.1.6.zip"
+$zipPath = "SharpCap-SSP-v0.2.0.zip"
 
 Write-Host "Creating $zipPath..." -ForegroundColor Green
 

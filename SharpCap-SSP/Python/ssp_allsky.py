@@ -5,7 +5,7 @@ Replicates AllSky2,57.bas functionality for wide-field photometry calibration.
 This module determines zero-point constants and residual extinction for 
 all-sky photometry across the entire visible sky.
 
-Version: 0.1.6
+Version: 0.2.0
 Date: January 2026
 Author: pep-ssp-tools project
 

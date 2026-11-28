@@ -252,22 +252,32 @@ def test_plate_solve_sync_logic():
             print("  ✗ Round-trip failed for %s" % checked)
             ok = False
     
-    # Mirrors the gate in _solve_and_sync_mount:
-    #   if self.config.get('plate_solve_sync', 0) != 1: return
-    def should_sync(config):
-        return config.get('plate_solve_sync', 0) == 1
+    # Mirrors the gate in _solve_and_sync_mount: a per-step override wins over
+    # the persisted checkbox; None falls back to the global option.
+    #   if plate_solve is None:
+    #       enabled = (config.get('plate_solve_sync', 0) == 1)
+    #   else:
+    #       enabled = bool(plate_solve)
+    def should_sync(config, plate_solve=None):
+        if plate_solve is None:
+            return config.get('plate_solve_sync', 0) == 1
+        return bool(plate_solve)
     
     cases = [
-        ({'plate_solve_sync': 1}, True),
-        ({'plate_solve_sync': 0}, False),
-        ({}, False),  # missing key -> defaults to off
+        ({'plate_solve_sync': 1}, None, True),
+        ({'plate_solve_sync': 0}, None, False),
+        ({}, None, False),                     # missing key -> defaults to off
+        ({'plate_solve_sync': 1}, 0, False),   # per-step override forces OFF
+        ({'plate_solve_sync': 0}, 1, True),    # per-step override forces ON
     ]
-    for config, expected in cases:
-        result = should_sync(config)
+    for config, plate_solve, expected in cases:
+        result = should_sync(config, plate_solve)
         if result == expected:
-            print("  ✓ Gate for %s -> run solve/sync: %s" % (config, result))
+            print("  ✓ Gate for %s (plate_solve=%s) -> solve/sync: %s"
+                  % (config, plate_solve, result))
         else:
-            print("  ✗ Gate for %s -> got %s, expected %s" % (config, result, expected))
+            print("  ✗ Gate for %s (plate_solve=%s) -> got %s, expected %s"
+                  % (config, plate_solve, result, expected))
             ok = False
     
     return ok

@@ -12,7 +12,7 @@ Example:
     python ssp_test_serial.py 5    # Test COM5
 
 Author: pep-ssp-tools project  
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr

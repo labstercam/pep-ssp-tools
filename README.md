@@ -1,7 +1,7 @@
 # pep-ssp-tools
 Tools for operating the Optec Photoelectric Photometers (PEP).
 
-**Current Version: v0.1.6** - Memory Leak Fix for Long Sessions
+**Current Version: v0.2.0** - Automated Sequence Runs
 
 Use entirely at your own risk. Please contact me with suggestions or feedback through the AAVSO PEP forum or through GitHub.
 
@@ -19,6 +19,10 @@ Working prototype of SSP data collection software using SharpCap. Features inclu
 - ✅ All Sky Calibration tool for extinction coefficient calculation (K'v, K'bv)
 - ✅ Automated and manual filter bar control
 - ✅ GOTO telescope integration
+- ✅ **NEW:** Automated sequence runs — GOTO Var/Comp/Sky + measurements, run-length
+  in minutes or observations, editor dialog with per-command help, `.ssp`/JSON sequences.
+  Switch catalog object mid-run with `TARGET` and slew to a star plus an RA/Dec
+  `offset=` (see [SEQUENCER_DEVELOPMENT.md](SharpCap-SSP/SEQUENCER_DEVELOPMENT.md))
 - ✅ Night mode UI with proper button highlighting
 - ✅ **NEW:** Memory leak / `OutOfMemoryException` fix for long sessions with a guide camera
   running — SSP waits now pump the UI message loop instead of blocking it. Measured over a

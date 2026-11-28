@@ -6,7 +6,7 @@ Handles serial communication with SSP photometer.
 Implements the SSP-3a/SSP-5a serial protocol.
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr

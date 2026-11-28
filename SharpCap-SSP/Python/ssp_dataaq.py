@@ -6,7 +6,7 @@ Main data acquisition window for SharpCap-SSP.
 Replicates SSPDataq3 functionality.
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr
@@ -151,10 +151,16 @@ class SSPDataAcquisitionWindow(Form):
         self.sequence = None              # currently loaded PEPSequence (or None)
         self._sequence = None             # the sequence being run
         self._sequence_running = False
+        self._sequence_paused = False     # Pause/Resume (holds between steps)
         self._sequence_obs_count = 0
         self._sequence_start = None
         self._sequence_step_index = 0
         self._sequence_steps_total = 0
+        # Compulsory autosave state (one .raw + .tab file per target)
+        self._autosave_key = None
+        self._autosave_raw = None
+        self._autosave_tab = None
+        self._autosave_header_written = False
         # Added for memory test (Phase 2) - cached bold Font for the target
         # label, created on first use and disposed in _on_form_closed
         self._target_label_font = None
@@ -318,7 +324,15 @@ class SSPDataAcquisitionWindow(Form):
         stop_seq_item.Click += self._on_stop_sequence
         sequence_menu.DropDownItems.Add(stop_seq_item)
         
+        self.pause_seq_item = ToolStripMenuItem("Pause Sequence")
+        self.pause_seq_item.Click += self._on_pause_sequence
+        sequence_menu.DropDownItems.Add(self.pause_seq_item)
+        
         sequence_menu.DropDownItems.Add(ToolStripSeparator())
+        
+        load_seq_item = ToolStripMenuItem("Load Sequence...")
+        load_seq_item.Click += self._on_load_sequence
+        sequence_menu.DropDownItems.Add(load_seq_item)
         
         edit_seq_item = ToolStripMenuItem("Edit Sequence...")
         edit_seq_item.Click += self._on_edit_sequence
@@ -660,6 +674,16 @@ class SSPDataAcquisitionWindow(Form):
             self.stop_seq_button.Click += self._on_stop_sequence
             self.Controls.Add(self.stop_seq_button)
             self.stop_seq_button.BringToFront()  # Raise AFTER Add - z-order requires it
+
+            # PAUSE / RESUME - holds the run between steps (see _on_pause_sequence)
+            self.pause_seq_button = Button()
+            self.pause_seq_button.Text = "PAUSE"
+            self.pause_seq_button.Location = Point(run_x + 200, run_y)
+            self.pause_seq_button.Size = Size(90, 30)
+            self.pause_seq_button.Enabled = False
+            self.pause_seq_button.Click += self._on_pause_sequence
+            self.Controls.Add(self.pause_seq_button)
+            self.pause_seq_button.BringToFront()  # Raise AFTER Add - z-order requires it
     
     def _update_time_display(self, sender, event):
         """Update time display."""
@@ -1099,6 +1123,111 @@ class SSPDataAcquisitionWindow(Form):
                 for i in range(self.data_saved_count, len(self.saved_data_tab)):
                     f.write(self.saved_data_tab[i] + "\n")
     
+    # --- Compulsory autosave (one .raw + .tab per target) ---------------------
+
+    def _autosave_header_info(self):
+        """Header info built from config (no dialog - autosave is silent)."""
+        return {
+            'telescope': self.config.get('telescope_name', '') or '',
+            'observer': self.config.get('observer_name', '') or '',
+            'conditions': self.config.get('last_conditions', '') or '',
+        }
+
+    def _autosave_target(self, object_val):
+        """Name used in the autosave filename: the session target star."""
+        try:
+            if self.current_target and self.current_target.variable:
+                return self.current_target.variable.name
+        except Exception:
+            pass
+        return object_val or "SSP"
+
+    def _autosave_dir(self):
+        """Directory for autosave files: last used data dir, else config dir."""
+        d = self.config.get('last_data_directory', '')
+        if not d:
+            try:
+                d = self.config.config_dir
+            except Exception:
+                d = None
+        if not d:
+            d = Path.GetTempPath()
+        return d
+
+    def _autosave_safe(self, name):
+        """Sanitise a target name for use in a filename."""
+        bad = r'<>:"/\|?*'
+        out = ''.join(('_' if ch in bad else ch) for ch in str(name))
+        return out.replace(' ', '_').strip('_') or 'SSP'
+
+    def _autosave_start(self, target):
+        """Return (raw_path, tab_path) for a new timestamped autosave file pair."""
+        stamp = DateTime.UtcNow.ToString("yyMMdd-HHmmss")
+        base = "%s-%s" % (stamp, self._autosave_safe(target))
+        folder = self._autosave_dir()
+        return (Path.Combine(folder, base + ".raw"),
+                Path.Combine(folder, base + ".tab"))
+
+    def _write_autosave_raw_header(self, filename, ut_date_header, header):
+        file_only = Path.GetFileName(filename)
+        with open(filename, 'w') as f:
+            f.write(" FILENAME=" + file_only.upper() +
+                    "       RAW OUTPUT DATA FROM SSP DATA ACQUISITION PROGRAM\n")
+            f.write(" UT DATE= " + ut_date_header + "   TELESCOPE= " +
+                    header['telescope'].upper() + "      OBSERVER= " +
+                    header['observer'].upper() + "\n")
+            f.write(" CONDITIONS= " + header['conditions'].upper() + "\n")
+            f.write(" MO-DY-YEAR    UT    CAT  OBJECT         F  "
+                    "----------COUNTS---------- INT SCLE COMMENTS\n")
+
+    def _write_autosave_tab_header(self, filename, ut_date_header, header):
+        file_only = Path.GetFileName(filename)
+        with open(filename, 'w') as f:
+            f.write(" FILENAME=" + file_only.upper() +
+                    "       RAW OUTPUT DATA FROM SSP DATA ACQUISITION PROGRAM\n")
+            f.write(" UT DATE= " + ut_date_header + "   TELESCOPE= " +
+                    header['telescope'].upper() + "      OBSERVER= " +
+                    header['observer'].upper() + "\n")
+            f.write(" CONDITIONS= " + header['conditions'].upper() + "\n")
+            f.write("CAT\tOBJECT\tF\tMO-DY-YEAR\tUT\tCOUNT1\tCOUNT2\tCOUNT3\t"
+                    "COUNT4\tINT\tSCLE\tCOMMENTS\n")
+
+    def _autosave_reading(self, object_val, data_line, data_line_tab):
+        """Silently append one reading to the per-target .raw and .tab files.
+
+        Compulsory and non-blocking: never shows a dialog. Files are opened,
+        appended and closed on every call and no buffers are retained, so it does
+        not accumulate memory over a long run. A failure is reported on the
+        status line only (the run is never interrupted).
+        """
+        try:
+            target = self._autosave_target(object_val)
+            if target != getattr(self, '_autosave_key', None):
+                # New target -> start a fresh timestamped file pair
+                self._autosave_key = target
+                self._autosave_raw, self._autosave_tab = self._autosave_start(target)
+                self._autosave_header_written = False
+
+            if not self._autosave_header_written:
+                ut_date_header = DateTime.UtcNow.ToString("MM/dd/yyyy")
+                header = self._autosave_header_info()
+                self._write_autosave_raw_header(self._autosave_raw, ut_date_header, header)
+                self._write_autosave_tab_header(self._autosave_tab, ut_date_header, header)
+                self._autosave_header_written = True
+
+            with open(self._autosave_raw, 'a') as f:
+                f.write(" " + data_line + "\n")
+            with open(self._autosave_tab, 'a') as f:
+                f.write(data_line_tab + "\n")
+
+            self._update_status("Autosaved: " + Path.GetFileName(self._autosave_raw))
+        except Exception as e:
+            # Never block the run - report on the status line and continue
+            try:
+                self._update_status("Autosave failed: " + str(e))
+            except Exception:
+                pass
+
     def _on_clear_data(self, sender, event):
         """Handle Clear Data menu item."""
         if len(self.data_array) == 0:
@@ -1113,6 +1242,8 @@ class SSPDataAcquisitionWindow(Form):
             self.data_saved_count = 0  # Reset saved count
             self.data_notes = {}  # Clear notes dictionary
             self.data_listbox.Items.Clear()
+            # Start a fresh autosave file for the next reading
+            self._autosave_key = None
             self._update_status("Data array cleared")
     
     def _on_open_script(self, sender, event):
@@ -1135,6 +1266,7 @@ class SSPDataAcquisitionWindow(Form):
         self.config.save()
         self._update_status("Loaded sequence '%s' (%d steps)"
                             % (seq.name, seq.get_count()))
+        self._warn_missing_targets(seq, context="loaded")
     
     def _on_quit(self, sender, event):
         """Handle Quit menu item."""
@@ -1941,6 +2073,10 @@ class SSPDataAcquisitionWindow(Form):
             # Add to listbox (display in reverse chronological order)
             self.data_listbox.Items.Insert(0, data_line)
 
+            # Compulsory silent autosave: append this reading to the per-target
+            # .raw and .tab files (never prompts, never blocks the run)
+            self._autosave_reading(object_val, data_line, data_line_tab)
+
         self._update_status("Data collection complete - " + str(len(counts)) + " readings." + (" Binned: " + str(binning == 2) if binning == 2 else ""))
 
         # Added for memory test - print memory stats after each completed reading
@@ -2257,94 +2393,101 @@ class SSPDataAcquisitionWindow(Form):
         self._log_memory_point("After StarSelectionDialog", force_gc=True)
         
         if result == DialogResult.OK and dialog.selected_target:
-            target = dialog.selected_target
-            
-            # Clean up extinction stars and restore normal object list
-            # Remove all items except the base ones (New Object, SKY, SKYNEXT, SKYLAST, CATALOG)
-            self.updating_object_combo = True
-            
-            base_items = ["New Object", "SKY", "SKYNEXT", "SKYLAST", "CATALOG"]
-            items_to_remove = []
-            
-            # Find items that need to be removed
+            self._apply_target(dialog.selected_target)
+
+    def _apply_target(self, target):
+        """Load a Var/Comp/Check catalog target into the Object dropdown.
+
+        Shared by the manual 'Select Star' dialog and the sequence TARGET
+        step: sets current_target, rebuilds the Object dropdown (base items
+        left untouched) and refreshes the target label and GOTO buttons.
+        """
+        # Clean up extinction stars and restore normal object list
+        # Remove all items except the base ones (New Object, SKY, SKYNEXT, SKYLAST, CATALOG)
+        self.updating_object_combo = True
+
+        base_items = ["New Object", "SKY", "SKYNEXT", "SKYLAST", "CATALOG"]
+        items_to_remove = []
+
+        # Find items that need to be removed
+        for i in range(self.object_combo.Items.Count):
+            item_text = str(self.object_combo.Items[i])
+            if item_text not in base_items:
+                items_to_remove.append(item_text)
+
+        # Remove non-base items
+        for item in items_to_remove:
+            self.object_combo.Items.Remove(item)
+
+        # Clear star name mapping for removed items
+        for item in items_to_remove:
+            if item in self.star_name_map:
+                del self.star_name_map[item]
+
+        # Store the selected target for GOTO functionality
+        self.current_target = target
+
+        # Enable GOTO button if in SharpCap mode
+        if self.sharpcap_available and hasattr(self, 'goto_button'):
+            self.goto_button.Enabled = True
+        elif self.sharpcap_available:
+            pass
+        else:
+            pass
+
+        # Enable two-stage GOTO button (has both Comp and Var stars) and reset to Comp
+        self.auto_goto_stage = 'comp'
+        if self.sharpcap_available and hasattr(self, 'goto_stage_button'):
+            self.goto_stage_button.Text = "GOTO Comp"
+            self.goto_stage_button.Enabled = True
+
+        # Update the current target label
+        self.current_target_label.Text = "Current Target: Var=%s | Comp=%s | Check=%s" % (
+            target.variable.name,
+            target.comparison.name,
+            target.check.name)
+        self.current_target_label.ForeColor = Color.DarkGreen
+        # Added for memory test (Phase 2) - reuse the cached font
+        self.current_target_label.Font = self._get_target_label_bold_font()
+
+        # Prepare display names and actual names
+        var_display = target.variable.name
+        var_actual = target.variable.name
+        comp_display = target.comparison.name + " (Comp)"
+        comp_actual = target.comparison.name
+        check_display = target.check.name + " (Check)"
+        check_actual = target.check.name
+
+        # Store mapping: display_name -> (actual_name, catalog_type)
+        # catalog_type: 'V'=Var, 'C'=Comp, 'K'=Check
+        self.star_name_map[var_display] = (var_actual, 'V')
+        self.star_name_map[comp_display] = (comp_actual, 'C')
+        self.star_name_map[check_display] = (check_actual, 'K')
+
+        # Helper function to add unique item
+        def add_unique_item(item_name):
             for i in range(self.object_combo.Items.Count):
-                item_text = str(self.object_combo.Items[i])
-                if item_text not in base_items:
-                    items_to_remove.append(item_text)
-            
-            # Remove non-base items
-            for item in items_to_remove:
-                self.object_combo.Items.Remove(item)
-            
-            # Clear star name mapping for removed items
-            for item in items_to_remove:
-                if item in self.star_name_map:
-                    del self.star_name_map[item]
-            
-            # Store the selected target for GOTO functionality
-            self.current_target = target
-            
-            # Enable GOTO button if in SharpCap mode
-            if self.sharpcap_available and hasattr(self, 'goto_button'):
-                self.goto_button.Enabled = True
-            elif self.sharpcap_available:
-                pass
-            else:
-                pass
-            
-            # Enable two-stage GOTO button (has both Comp and Var stars) and reset to Comp
-            self.auto_goto_stage = 'comp'
-            if self.sharpcap_available and hasattr(self, 'goto_stage_button'):
-                self.goto_stage_button.Text = "GOTO Comp"
-                self.goto_stage_button.Enabled = True
-            
-            # Update the current target label
-            self.current_target_label.Text = "Current Target: Var=%s | Comp=%s | Check=%s" % (
-                target.variable.name,
-                target.comparison.name,
-                target.check.name)
-            self.current_target_label.ForeColor = Color.DarkGreen
-            # Added for memory test (Phase 2) - reuse the cached font
-            self.current_target_label.Font = self._get_target_label_bold_font()
-            
-            # Prepare display names and actual names
-            var_display = target.variable.name
-            var_actual = target.variable.name
-            comp_display = target.comparison.name + " (Comp)"
-            comp_actual = target.comparison.name
-            check_display = target.check.name + " (Check)"
-            check_actual = target.check.name
-            
-            # Store mapping: display_name -> (actual_name, catalog_type)
-            # catalog_type: 'V'=Var, 'C'=Comp, 'K'=Check
-            self.star_name_map[var_display] = (var_actual, 'V')
-            self.star_name_map[comp_display] = (comp_actual, 'C')
-            self.star_name_map[check_display] = (check_actual, 'K')
-            
-            # Helper function to add unique item
-            def add_unique_item(item_name):
-                for i in range(self.object_combo.Items.Count):
-                    if str(self.object_combo.Items[i]) == item_name:
-                        return i  # Already exists
-                self.object_combo.Items.Add(item_name)
-                return self.object_combo.Items.Count - 1
-            
-            # Add all three stars
-            var_index = add_unique_item(var_display)
-            comp_index = add_unique_item(comp_display)
-            check_index = add_unique_item(check_display)
-            
-            # Select the variable star by default
-            self.object_combo.SelectedIndex = var_index
-            
-            # Re-enable event handling
-            self.updating_object_combo = False
-            
-            # Auto-set catalog to Var
-            self._set_catalog_for_object(var_display)
-            
-            self._update_status("Added target stars: %s, %s, %s - Variable selected" % (
-                var_display, comp_display, check_display))
+                if str(self.object_combo.Items[i]) == item_name:
+                    return i  # Already exists
+            self.object_combo.Items.Add(item_name)
+            return self.object_combo.Items.Count - 1
+
+        # Add all three stars
+        var_index = add_unique_item(var_display)
+        comp_index = add_unique_item(comp_display)
+        check_index = add_unique_item(check_display)
+
+        # Select the variable star by default
+        self.object_combo.SelectedIndex = var_index
+
+        # Re-enable event handling
+        self.updating_object_combo = False
+
+        # Auto-set catalog to Var
+        self._set_catalog_for_object(var_display)
+
+        self._update_status("Added target stars: %s, %s, %s - Variable selected" % (
+            var_display, comp_display, check_display))
     
     def _on_object_changed(self, sender, event):
         """Handle object selection change - auto-set catalog type."""
@@ -2644,7 +2787,7 @@ class SSPDataAcquisitionWindow(Form):
         finally:
             self._set_goto_buttons_enabled(True)
     
-    def _slew_to_star(self, star, star_type, headless=False):
+    def _slew_to_star(self, star, star_type, headless=False, plate_solve=None):
         """Slew the telescope to a star.
         
         Uses SharpCap mount control when a mount is connected, otherwise falls back
@@ -2655,6 +2798,10 @@ class SSPDataAcquisitionWindow(Form):
             star_type: Human-readable label for status messages (e.g. "Comparison")
             headless: When True (sequence engine), suppress the modal manual-GOTO
                       dialog and just report the copied coordinates (NFR-3)
+            plate_solve: Per-step override of the "Plate Solve and Sync" option.
+                      None (default) = use the global checkbox; 0/False = skip the
+                      solve for this slew; 1/True = force it on. Lets a sequence
+                      slew to an offset/sky position without a slow plate solve.
         
         Returns:
             True if the slew (or manual fallback) was performed, else False
@@ -2711,7 +2858,7 @@ class SSPDataAcquisitionWindow(Form):
                 # Added for memory test - bracket the solve with checkpoints so
                 # its blocking window is measurable in the memory log.
                 self._log_memory_point("Before SolveAndSync")
-                self._solve_and_sync_mount(mount, star_type, star)
+                self._solve_and_sync_mount(mount, star_type, star, plate_solve)
                 self._log_memory_point("After SolveAndSync", force_gc=True)
                 
                 print("GOTO completed: RA %.4fh, Dec %.4f°" % (ra_hours, dec_degrees))
@@ -2755,7 +2902,7 @@ class SSPDataAcquisitionWindow(Form):
             self._update_status("GOTO failed: " + str(e))
             return False
     
-    def _solve_and_sync_mount(self, mount, star_type, star):
+    def _solve_and_sync_mount(self, mount, star_type, star, plate_solve=None):
         """Plate solve + sync the mount after a GOTO when the option is enabled.
         
         Mirrors the occultation-manager behaviour: skipped silently when the
@@ -2767,9 +2914,17 @@ class SSPDataAcquisitionWindow(Form):
             mount: SharpCap mount object (SharpCap.Mounts.SelectedMount)
             star_type: Human-readable label for status messages (e.g. "Variable")
             star: StarData object that was slewed to (used for status text)
+            plate_solve: Per-step override - None uses the global checkbox,
+                         otherwise 0/False skips the solve and 1/True forces it.
         """
-        # Only run when the user has ticked the checkbox (persisted config)
-        if self.config.get('plate_solve_sync', 0) != 1:
+        # Decide whether to solve: a per-step override wins over the global
+        # "Plate Solve and Sync" checkbox (persisted config). This lets a
+        # sequence slew to an offset/sky position without a slow plate solve.
+        if plate_solve is None:
+            enabled = (self.config.get('plate_solve_sync', 0) == 1)
+        else:
+            enabled = bool(plate_solve)
+        if not enabled:
             return
         
         # Some mount drivers/versions do not expose SolveAndSync at all
@@ -2980,6 +3135,69 @@ class SSPDataAcquisitionWindow(Form):
 
     # --- Sequence engine (Phase 2) -----------------------------------------
 
+    def _sequence_target_issues(self, seq):
+        """Classify a sequence's TARGET steps against the loaded catalog.
+
+        Returns (status, missing) where status is:
+            'ok'      - every TARGET object resolved (missing = [])
+            'missing' - some (or, with no catalog loaded, all) TARGET objects
+                        could not be resolved (missing = [(index, identifier)])
+        """
+        try:
+            missing = ssp_sequence.missing_catalog_targets(seq, self.catalog)
+        except Exception as e:
+            print("Sequence target check failed: %s" % e)
+            missing = None
+        if missing is None:
+            # No catalog loaded: every TARGET step is unverifiable, so report
+            # them all as missing so the caller still warns.
+            try:
+                targets = [(idx, ident) for idx, ident, _t
+                           in ssp_sequence.find_target_steps(seq)]
+            except Exception:
+                targets = []
+            if not targets:
+                return ('ok', [])
+            return ('missing', targets)
+        if missing:
+            return ('missing', missing)
+        return ('ok', [])
+
+    def _warn_missing_targets(self, seq, context="loaded"):
+        """Non-blocking warning when a loaded sequence references unknown targets."""
+        status, missing = self._sequence_target_issues(seq)
+        if status != 'missing':
+            return
+        listing = "\n".join("%d. %s" % (idx, ident) for idx, ident in missing)
+        MessageBox.Show(
+            "The %s sequence references %d TARGET object(s) that are not in "
+            "the loaded star catalog:\n\n%s\n\nThey will be skipped at run "
+            "time unless the catalog is updated."
+            % (context, len(missing), listing),
+            "Unknown Targets", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+
+    def _preflight_sequence_targets(self, seq):
+        """Check TARGET objects before a run; give the user 10 s to cancel.
+
+        Returns True to proceed (all objects present, or the countdown finished)
+        and False if the user cancelled. Nothing runs during the countdown.
+        """
+        status, missing = self._sequence_target_issues(seq)
+        if status != 'missing':
+            return True
+        listing = "\n".join("%d. %s" % (idx, ident) for idx, ident in missing)
+        try:
+            dialog = ssp_dialogs.CountdownWarningDialog(
+                "Some TARGET objects are not in the loaded star catalog and will "
+                "be skipped. The sequence will start automatically.",
+                title="Sequence Warning", seconds=10, details=listing,
+                night_mode=self.night_mode)
+            result = dialog.ShowDialog(self)
+        except Exception as e:
+            print("Countdown warning failed: %s" % e)
+            return True
+        return result == DialogResult.OK
+
     def _on_run_sequence(self, sender, event):
         """Run the loaded sequence (opening the editor if none is loaded)."""
         seq = self.sequence
@@ -2991,6 +3209,11 @@ class SSPDataAcquisitionWindow(Form):
             return
         if self.current_target is None:
             self._update_status("Note: no target selected - GOTO steps will be skipped")
+        # Validate TARGET objects; if any are missing, announce the run and give
+        # the user 10 s to cancel (nothing runs during the countdown).
+        if not self._preflight_sequence_targets(seq):
+            self._update_status("Sequence run cancelled")
+            return
         # Apply the configured default run length if the sequence has none
         if not seq.max_minutes and not seq.max_observations and not seq.repeat:
             minutes = self.config.get('sequence_max_minutes', 60)
@@ -2999,17 +3222,75 @@ class SSPDataAcquisitionWindow(Form):
         self._remember_sequence(seq)
         self.run_sequence(seq)
 
+    def _on_load_sequence(self, sender, event):
+        """Pick a saved sequence (or a built-in template) and load it."""
+        directory = self._sequences_dir()
+        saved = []
+        if directory:
+            try:
+                saved = ssp_sequence.list_names(directory)
+            except Exception:
+                saved = []
+        try:
+            templates = list(ssp_sequence.build_templates().keys())
+        except Exception:
+            templates = []
+        try:
+            dialog = ssp_dialogs.SequencePickerDialog(
+                saved, templates, night_mode=self.night_mode)
+        except Exception as e:
+            MessageBox.Show("Could not open the sequence picker:\n" + str(e),
+                            "Load Sequence", MessageBoxButtons.OK,
+                            MessageBoxIcon.Error)
+            return
+        if dialog.ShowDialog(self) != DialogResult.OK:
+            return
+        if dialog.selected_name:
+            self._load_sequence_by_name(dialog.selected_name)
+
+    def _load_sequence_by_name(self, name):
+        """Load a saved sequence (else a built-in template) into self.sequence."""
+        seq = None
+        directory = self._sequences_dir()
+        if directory:
+            try:
+                seq = ssp_sequence.load_named(directory, name)
+            except Exception:
+                seq = None
+        if seq is None:
+            try:
+                seq = ssp_sequence.build_templates().get(name)
+            except Exception:
+                seq = None
+        if seq is None:
+            MessageBox.Show("Could not load sequence '%s'." % name,
+                            "Load Sequence", MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning)
+            return
+        self.sequence = seq
+        try:
+            self.config.set('last_sequence_name', seq.name)
+            self.config.save()
+        except Exception:
+            pass
+        self._update_status("Loaded sequence '%s' (%d steps)"
+                            % (seq.name, seq.get_count()))
+        self._warn_missing_targets(seq, context="loaded")
+
     def _on_edit_sequence(self, sender, event):
         """Open the sequence builder dialog; run the sequence if requested."""
         try:
             dialog = ssp_dialogs.SequenceDialog(
                 sequence=self.sequence, sequences_dir=self._sequences_dir(),
-                night_mode=self.night_mode)
+                night_mode=self.night_mode, catalog=self.catalog)
             dialog.ShowDialog(self)
             self.sequence = dialog.sequence
             if dialog.run_requested:
                 self._remember_sequence(self.sequence)
-                self.run_sequence(self.sequence)
+                if self._preflight_sequence_targets(self.sequence):
+                    self.run_sequence(self.sequence)
+                else:
+                    self._update_status("Sequence run cancelled")
         except Exception as e:
             import traceback
             print("Sequence editor error: %s" % e)
@@ -3059,6 +3340,69 @@ class SSPDataAcquisitionWindow(Form):
         else:
             self._update_status("No sequence is running")
 
+    def _update_pause_controls(self):
+        """Reflect the paused state on the PAUSE/RESUME button and menu item."""
+        text = "RESUME" if self._sequence_paused else "PAUSE"
+        try:
+            if hasattr(self, 'pause_seq_button'):
+                self.pause_seq_button.Text = text
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'pause_seq_item'):
+                self.pause_seq_item.Text = ("Resume Sequence"
+                                            if self._sequence_paused
+                                            else "Pause Sequence")
+        except Exception:
+            pass
+
+    def _on_pause_sequence(self, sender, event):
+        """Toggle Pause/Resume for the running sequence.
+
+        Pause completes the current step first, then holds between steps. While
+        paused the manual controls are unlocked so SharpCap and the SSP
+        interface stay usable (GOTO, filter, integration, START, ...). STOP ends
+        the run. This method only flips the flag; the hold itself happens in
+        _sequence_wait_if_paused, which is checked between steps.
+        """
+        if not self._sequence_running:
+            self._update_status("No sequence is running")
+            return
+        self._sequence_paused = not self._sequence_paused
+        self._update_pause_controls()
+        if self._sequence_paused:
+            self._update_status("Pause requested - will hold after the current step")
+        else:
+            self._update_status("Resume requested")
+
+    def _sequence_wait_if_paused(self):
+        """Hold between steps while paused; return False if the run should end.
+
+        The previous step has already completed when this is reached. The UI
+        keeps pumping (via ssp_comm.pump_sleep, which calls the host message
+        pump) so SharpCap and the SSP controls remain responsive; the manual
+        GOTO/START buttons are unlocked for the duration and re-locked on
+        resume.
+        """
+        if not self._sequence_paused:
+            return True
+        # Now actually paused: unlock the manual controls (START/GOTO/...).
+        self._set_sequence_controls_running(self._sequence_running)
+        self._update_status("Sequence PAUSED - press RESUME to continue, STOP to end")
+        while self._sequence_paused:
+            if self._closing or self._sequence_abort:
+                return False
+            try:
+                ssp_comm.pump_sleep(0.1)
+            except Exception:
+                pass
+        if self._closing or self._sequence_abort:
+            return False
+        # Resumed: re-lock the manual controls and carry on.
+        self._set_sequence_controls_running(self._sequence_running)
+        self._update_status("Sequence resumed")
+        return True
+
     def _on_load_template(self, template_name):
         """Load one of the built-in templates into self.sequence."""
         seq = ssp_sequence.build_templates().get(template_name)
@@ -3069,6 +3413,7 @@ class SSPDataAcquisitionWindow(Form):
         self.config.save()
         self._update_status("Loaded template '%s' (%d steps)"
                             % (seq.name, seq.get_count()))
+        self._warn_missing_targets(seq, context="template '%s'" % seq.name)
 
     def _on_export_sequence(self, sender, event):
         """Export the loaded sequence to a .ssp-style text file."""
@@ -3106,11 +3451,13 @@ class SSPDataAcquisitionWindow(Form):
 
         self._sequence_running = True
         self._sequence_abort = False
+        self._sequence_paused = False
         self._sequence_obs_count = 0
         self._sequence = sequence
         self._sequence_start = DateTime.UtcNow
         self._sequence_step_index = 0
         self._sequence_steps_total = sequence.get_count()
+        self._update_pause_controls()
         self._set_sequence_controls_running(True)
         try:
             self._update_status("Sequence '%s' started" % sequence.name)
@@ -3129,8 +3476,10 @@ class SSPDataAcquisitionWindow(Form):
                     break
         finally:
             self._sequence_running = False
+            self._sequence_paused = False
             self._sequence = None
             self._set_sequence_controls_running(False)
+            self._update_pause_controls()
             self._update_status("Sequence finished - %d observations"
                                 % self._sequence_obs_count)
             print("Sequence finished - %d observations" % self._sequence_obs_count)
@@ -3158,6 +3507,9 @@ class SSPDataAcquisitionWindow(Form):
         while i < n:
             if self._sequence_should_stop(sequence):
                 return
+            # Hold between steps while paused (the current step has completed).
+            if not self._sequence_wait_if_paused():
+                return
             step = steps[i]
             self._sequence_step_index = i + 1
             self._update_step_status(sequence, step)
@@ -3165,6 +3517,8 @@ class SSPDataAcquisitionWindow(Form):
             try:
                 if kind == "GOTO":
                     self._step_goto(step)
+                elif kind == "TARGET":
+                    self._step_target(step)
                 elif kind == "MEASURE":
                     self._step_measure(step)
                 elif kind == "SKY":
@@ -3224,7 +3578,29 @@ class SSPDataAcquisitionWindow(Form):
         if not self.sharpcap_available:
             self._update_status("GOTO skipped (standalone): %s" % label)
             return
-        self._slew_to_star(star, label, headless=True)
+        # Honour an optional per-step 'plate_solve=0/1' override
+        self._slew_to_star(star, label, headless=True,
+                           plate_solve=step.params.get('plate_solve'))
+
+    def _step_target(self, step):
+        """Load a catalog object (name or AUID) as the current target.
+
+        Silently skips (no exception, no abort) when the object is not in the
+        loaded catalog, matching the 'missing star' behaviour of GOTO V/C/K.
+        Once applied, the following GOTO V/C/K steps, the MEASURE/SKY defaults
+        and ABORT_IF all use the new target.
+        """
+        p = step.params
+        ident = str(p.get('object') or '').strip()
+        if not ident:
+            self._update_status("TARGET skipped: no object given")
+            return
+        target = ssp_sequence.resolve_catalog_target(
+            self.catalog, ident, p.get('id_type'))
+        if target is None:
+            self._update_status("TARGET skipped: '%s' not in catalog" % ident)
+            return
+        self._apply_target(target)
 
     def _step_measure(self, step):
         """One PEP measurement; missing params inherit the current UI values."""
@@ -3249,6 +3625,9 @@ class SSPDataAcquisitionWindow(Form):
         coord = dict((k, p[k]) for k in ('ra', 'dec', 'd_ra_h', 'd_dec_deg')
                      if k in p)
         if coord:
+            # Carry the per-step plate-solve override through to the offset slew
+            if 'plate_solve' in p:
+                coord['plate_solve'] = p['plate_solve']
             self._step_goto(ssp_sequence.SequenceStep('GOTO', star_ref='SKY', **coord))
         ok, _line = self.take_reading(
             label, " ",
@@ -3341,27 +3720,55 @@ class SSPDataAcquisitionWindow(Form):
         return False
 
     def _resolve_step_star(self, step):
-        """Return (StarData, label) for a GOTO/SKY step, or (None, reason)."""
+        """Return (StarData, label) for a GOTO/SKY step, or (None, reason).
+
+        A star reference (V/C/K) or absolute RA/Dec may be combined with an
+        RA/Dec offset (``d_ra_h`` / ``d_dec_deg``), so ``GOTO, V, 0.0, 0.25``
+        slews to the variable star shifted by the offset, and ``GOTO, OFFSET``
+        (or ``SKY``) with no explicit star offsets from the variable star.
+        """
         p = step.params
         ref = str(p.get('star_ref', 'V')).upper()
-        if ref == 'V':
-            v = self.current_target.variable if self.current_target else None
-            return (v, "Variable") if v else (None, "no target selected")
-        if ref == 'C':
-            c = self.current_target.comparison if self.current_target else None
-            return (c, "Comparison") if c else (None, "no comparison star")
-        if ref == 'K':
-            k = self.current_target.check if self.current_target else None
-            return (k, "Check") if k else (None, "no check star")
-        if (ref in ('SKY', 'OFFSET') or 'ra' in p or 'd_ra_h' in p or
-                'd_dec_deg' in p):
-            if 'ra' in p and 'dec' in p:
-                star = self._make_star_from_radec(p['ra'], p['dec'])
-            else:
-                star = self._make_offset_star(float(p.get('d_ra_h', 0.0)),
-                                              float(p.get('d_dec_deg', 0.0)))
-            return (star, "Sky offset") if star else (None, "no target for offset")
-        return (None, "unknown star_ref %r" % ref)
+        d_ra_h = float(p.get('d_ra_h', 0.0))
+        d_dec_deg = float(p.get('d_dec_deg', 0.0))
+        has_offset = ('d_ra_h' in p) or ('d_dec_deg' in p)
+
+        # Resolve the base star / coordinates
+        if 'ra' in p and 'dec' in p:
+            base = self._make_star_from_radec(p['ra'], p['dec'])
+            label = "RA/Dec"
+        elif ref == 'V':
+            base = self.current_target.variable if self.current_target else None
+            label = "Variable"
+        elif ref == 'C':
+            base = self.current_target.comparison if self.current_target else None
+            label = "Comparison"
+        elif ref == 'K':
+            base = self.current_target.check if self.current_target else None
+            label = "Check"
+        elif ref in ('SKY', 'OFFSET'):
+            base = self.current_target.variable if self.current_target else None
+            label = "Sky offset"
+        else:
+            return (None, "unknown star_ref %r" % ref)
+
+        if base is None:
+            if ref == 'V':
+                return (None, "no target selected")
+            if ref == 'C':
+                return (None, "no comparison star")
+            if ref == 'K':
+                return (None, "no check star")
+            return (None, "no target for offset")
+
+        # Apply an optional RA/Dec offset on top of the base star
+        if has_offset:
+            shifted = self._offset_star(base, d_ra_h, d_dec_deg)
+            if shifted is not None:
+                base = shifted
+                if label in ('Variable', 'Comparison', 'Check'):
+                    label = label + " + offset"
+        return (base, label)
 
     def _make_offset_star(self, d_ra_h, d_dec_deg, name="SKY-OFF"):
         """Pseudo StarData offset from the current target's variable star.
@@ -3373,10 +3780,20 @@ class SSPDataAcquisitionWindow(Form):
         """
         if not (self.current_target and self.current_target.variable):
             return None
-        v = self.current_target.variable
-        ra_h = (v.ra_hours + v.ra_minutes / 60.0 + v.ra_seconds / 3600.0 +
-                d_ra_h) % 24.0
-        dec = v.dec_degrees_decimal + d_dec_deg
+        return self._offset_star(self.current_target.variable, d_ra_h, d_dec_deg,
+                                 name)
+
+    def _offset_star(self, base, d_ra_h, d_dec_deg, name=None):
+        """Pseudo StarData offset from `base` by dRA hours / dDec degrees.
+
+        Small offsets only: the delta is applied directly to RA hours and Dec
+        degrees (precession/refraction ignored). Returns None if `base` is None.
+        """
+        if base is None:
+            return None
+        ra_h = (base.ra_hours + base.ra_minutes / 60.0 +
+                base.ra_seconds / 3600.0 + d_ra_h) % 24.0
+        dec = base.dec_degrees_decimal + d_dec_deg
         rh = int(ra_h)
         rm = int((ra_h - rh) * 60.0)
         rs = (((ra_h - rh) * 60.0) - rm) * 60.0
@@ -3385,7 +3802,9 @@ class SSPDataAcquisitionWindow(Form):
         dd = int(da) * sign
         dm = int((da - abs(dd)) * 60.0)
         ds = (((da - abs(dd)) * 60.0) - dm) * 60.0
-        return ssp_catalog.StarData(name=name, ra_hours=rh, ra_minutes=rm,
+        return ssp_catalog.StarData(name=(name or getattr(base, 'name', '') or
+                                          "SKY-OFF"),
+                                    ra_hours=rh, ra_minutes=rm,
                                     ra_seconds=rs, dec_degrees=dd,
                                     dec_minutes=dm, dec_seconds=ds)
 
@@ -3470,20 +3889,32 @@ class SSPDataAcquisitionWindow(Form):
             pass
 
     def _set_sequence_controls_running(self, running):
-        """Lock START/GOTO/RUN during a run; toggle STOP."""
+        """Lock START/GOTO/RUN during a run; toggle STOP/PAUSE.
+
+        While paused the manual controls (START, GOTO) are re-enabled so the
+        operator can use the SSP interface without the run advancing; the combos
+        (filter/gain/integration/interval/mode) are never locked.
+        """
         try:
+            manual = (not running) or self._sequence_paused
             if hasattr(self, 'start_button'):
-                self.start_button.Enabled = not running
+                self.start_button.Enabled = manual
             if hasattr(self, 'run_seq_button'):
                 self.run_seq_button.Enabled = not running
             if hasattr(self, 'stop_seq_button'):
                 self.stop_seq_button.Enabled = running
+            if hasattr(self, 'pause_seq_button'):
+                self.pause_seq_button.Enabled = running
+            if hasattr(self, 'pause_seq_item'):
+                self.pause_seq_item.Enabled = running
             if hasattr(self, 'goto_button'):
-                self.goto_button.Enabled = (not running) and bool(self.current_target)
+                self.goto_button.Enabled = manual and bool(self.current_target)
             if hasattr(self, 'goto_stage_button'):
                 has_comp = bool(self.current_target and
                                 self.current_target.comparison)
-                self.goto_stage_button.Enabled = (not running) and has_comp
+                self.goto_stage_button.Enabled = manual and has_comp
+            if not running:
+                self._sequence_paused = False
         except Exception:
             pass
 

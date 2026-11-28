@@ -6,7 +6,7 @@ Manages configuration settings for SharpCap-SSP.
 Supports both JSON (master) and dparms.txt (backward compatibility) formats.
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr
@@ -39,6 +39,7 @@ class SSPConfig:
         'observer_longitude': 0.0,  # Decimal degrees, positive East, -180 to +180
         'observer_elevation': 0.0,  # Meters above sea level
         'observer_city': '',        # City/town name (optional)
+        'last_conditions': '',      # Last entered conditions (autosave file header)
         'last_filter_index': 2,  # V filter (0-indexed)
         'last_gain_index': 0,
         'last_integ_index': 0,

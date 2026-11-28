@@ -295,7 +295,20 @@ skipped when the option is off, when `SolveAndSync` is missing, or when
 
 ```python
 # Inside _slew_to_star, after the settle loop:
-self._solve_and_sync_mount(mount, star_type, star)
+self._solve_and_sync_mount(mount, star_type, star, plate_solve)
+```
+
+**Per-step override (sequences).** A `GOTO` or `SKY` step may carry
+`plate_solve=0` (or `=1`) to override the checkbox for that one slew — used to
+slew to an offset/sky position quickly without a solve. `_slew_to_star` and
+`_solve_and_sync_mount` take a `plate_solve` kwarg (`None` = use the checkbox,
+`0` = skip, `1` = force). The flag is parsed/serialised in `ssp_sequence.py`
+(`_parse_goto`, `_coerce_measure`, `_step_to_text`, `step_from_fields`,
+`fields_from_step`) and forwarded by `_step_goto` / `_step_sky`:
+
+```
+GOTO, V, offset=0.0,0.25, plate_solve=0
+SKY, label=SKYLAST, offset=0.0,0.25, plate_solve=0
 ```
 
 Because both GOTO buttons funnel through `_slew_to_star`, the option applies to
@@ -324,6 +337,78 @@ the whole GOTO/solve. It degrades to a plain block when the task has no `IsCompl
 stops early if `self._closing` is set, and is capped at 300 s. START is locked for the
 duration (via `_set_goto_buttons_enabled`) so a pumped click cannot start an
 acquisition mid-slew.
+
+## Sequence Engine (Phases 2-4)
+
+Automated PEP runs are driven by `ssp_sequence.py` (pure data + I/O) and an
+executor on `SSPDataAcquisitionWindow` in `ssp_dataaq.py`. See
+`SEQUENCER_DEVELOPMENT.md` for the full design.
+
+### Key rules
+- The executor runs on the **UI thread** and pumps between steps; every wait uses
+  `ssp_comm.pump_sleep` (never `time.sleep`), so a running camera's frame queue drains.
+- Guard flags: `_sequence_running` (re-entry), `_sequence_abort` (STOP), plus the
+  existing `_closing`. All are checked between steps and inside the count loop.
+- **Pause / Resume**: the PAUSE button (and `Sequence → Pause Sequence`) flips
+  `_sequence_paused`; the hold itself happens in `_sequence_wait_if_paused`, checked
+  at the top of every `_run_step_list` iteration, so the **current step completes
+  first**. The hold pumps the UI (`ssp_comm.pump_sleep`) and
+  `_set_sequence_controls_running` re-enables the manual **START/GOTO** buttons while
+  paused, so SharpCap and the SSP interface stay usable (GOTO, filter, integration,
+  START). STOP ends the run; the flag/button reset in `run_sequence`'s `finally`.
+- **No modal dialogs during a run** (NFR-3): `_slew_to_star(..., headless=True)` and
+  `take_reading(..., headless=True)` suppress the manual-GOTO and config-error
+  dialogs; a failure logs a status line and the run continues.
+- `take_reading` **coerces gain to int** (`set_gain` compares against the ints
+  1/10/100). MEASURE steps inherit the current UI filter/gain/integration unless the
+  step overrides them (e.g. Params = `filter=V, integ=5, interval=3, gain=10`).
+- The step list is flat; `REPEAT`/`END` are markers resolved by `_find_matching_end`.
+- `WAIT_UNTIL` uses an absolute **UTC date/time**; <= 30 min late proceeds with a
+  warning, > 30 min late stops the run.
+- `run_sequence` bounds the run: passes until a length limit, or one pass if none is
+  set (avoids an unbounded loop).
+- **Compulsory autosave**: `take_reading` calls `_autosave_reading`, which appends the
+  line to a per-target `.raw` + `.tab` pair (`YYMMDD-HHMMSS-<target>`). It is silent
+  (status line only on failure), opens/appends/closes each time (no retained buffers),
+  and writes the header once per file — so it does not accumulate memory.
+
+### Target switching & offsets
+- `TARGET, <name>` / `TARGET, auid=...` loads a catalog object (and its Var/Comp/
+  Check triple) mid-run via `_apply_target`, extracted from `_on_select_star` so the
+  manual "Select Target Star" dialog and the step share one code path. Following
+  `GOTO V/C/K`, the `MEASURE`/`SKY` defaults and `ABORT_IF` then use the new target.
+- Offsets use **one syntax everywhere**: `offset=dRA,dDec` (GOTO and SKY, in the
+  `.ssp` text and the editor Params box). `_resolve_step_star` applies the offset
+  **on top of** the resolved star/coords via `_offset_star`, so
+  `GOTO, V, offset=0,0.05` = variable star + offset. Legacy `GOTO, OFFSET,dRA,dDec`
+  / `GOTO, V,dRA,dDec` still parse but are normalised to `offset=`.
+- Missing `TARGET` objects: `missing_catalog_targets` warns (popup) when a `TARGET`
+  step is added/edited, warns (non-blocking) on editor open / load, and the run
+  pre-flight shows a 10 s `CountdownWarningDialog` (cancel aborts); `_step_target`
+  skips silently at run time.
+- The editor shows the selected command's **syntax and "what it does"** in a help
+  panel (`SequenceDialog.COMMAND_HELP` / `_update_help`).
+
+### UI gotcha: ComboBox.Items.Clear() blanks the text
+`ComboBox.Items.Clear()` resets a WinForms ComboBox's edit text. `_refresh_sequence_list`
+saves and restores the **Sequence** box text around the clear (the same pattern
+`filter_combo` uses); without it the name is blanked when the editor opens and
+**Save As** hits its empty-name early return — i.e. "does nothing".
+
+### Files
+- `ssp_sequence.py` — `SequenceStep`, `PEPSequence`, `.ssp`/JSON I/O,
+  `step_from_fields`/`fields_from_step`, catalog-target helpers
+  (`find_target_steps`, `resolve_catalog_target`, `missing_catalog_targets`),
+  named storage (`save_named`, `load_named`, `list_names`, `delete_named`), templates.
+- `ssp_dialogs.SequenceDialog` — the sequence editor (night-mode aware, per-command
+  help panel, `CountdownWarningDialog` pre-flight, catalog validation).
+- `ssp_dialogs.SequencePickerDialog` — the `Sequence → Load Sequence…` picker
+  (saved sequences first, then built-in templates).
+- `ssp_dataaq.py` — executor, step handlers (`_step_target`, `_offset_star`),
+  `Sequence` menu (Load / Edit / Load Template / Export), RUN SEQ / STOP buttons,
+  pre-flight + load warnings. `_on_load_sequence` / `_load_sequence_by_name` load a
+  saved sequence (falling back to a template of the same name).
+- `test_sequence.py` — regression suite (`.\run_ipy_test.ps1 test_sequence.py`).
 
 ## Testing Strategy
 
@@ -423,11 +508,12 @@ When in doubt, check how occultation-manager does it:
 ## Future Enhancements
 
 ### Planned Features
-- [ ] Plate solve and sync after GOTO
+- [x] Plate solve and sync after GOTO
 - [ ] Configurable mount settling timeout
 - [ ] Auto-focus after GOTO
-- [ ] Sequence automation (auto-cycle var→comp→check)
-- [ ] Target queue system
+- [x] Sequence automation (auto-cycle var→comp→check) — see SEQUENCER_DEVELOPMENT.md
+- [x] Mid-run catalog object switch (`TARGET` step, by name or AUID)
+- [ ] Full target queue editor (ordered multi-target queue)
 
 ### Refactoring Ideas
 - Extract GOTO logic into separate module

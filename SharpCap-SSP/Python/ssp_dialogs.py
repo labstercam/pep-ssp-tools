@@ -5,7 +5,7 @@ SSP Dialog Windows
 Dialog windows for configuration and data entry.
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr
@@ -860,17 +860,90 @@ class SequenceDialog(Form):
     ``run_requested``; if True the caller should run ``dialog.sequence``.
     """
 
-    KINDS = ["GOTO", "MEASURE", "SKY", "FILTER", "WAIT", "WAIT_UNTIL",
-             "ABORT_IF", "REPEAT", "END"]
+    KINDS = ["GOTO", "TARGET", "MEASURE", "SKY", "FILTER", "WAIT",
+             "WAIT_UNTIL", "ABORT_IF", "REPEAT", "END"]
 
-    def __init__(self, sequence=None, sequences_dir=None, night_mode=None):
+    # Help shown in the editor for the currently selected Kind.
+    # Each entry is (command, syntax, what_it_does); the first two are the
+    # .ssp command name and a one-line syntax summary, the third is the
+    # "what it does" explanation (see QUICK_START.md command reference).
+    COMMAND_HELP = {
+        "GOTO": (
+            "GOTO",
+            "GOTO, V | GOTO, C | GOTO, K | GOTO, RA,Dec | GOTO, OFFSET,dRA,dDec",
+            "Slew to the target's Variable / Comparison / Check star, to absolute "
+            "coordinates (RA in decimal hours, Dec in decimal degrees), or to an "
+            "offset from the variable star. Value = V / C / K, RA,Dec or "
+            "offset=dRA,dDec. Params may add plate_solve=0 to skip the "
+            "plate-solve+sync for this step (plate_solve=1 forces it on). An "
+            "RA/Dec offset (offset=dRA,dDec - the same syntax SKY uses) may "
+            "also be given in the Params box; it is applied on top of Value, "
+            "e.g. Value=V with offset=0,0.25 slews to the variable star plus "
+            "the offset."),
+        "TARGET": (
+            "TARGET",
+            "TARGET, OMI CET | TARGET, auid=000-BBW-425",
+            "Load a new catalog object (by name or AUID) and its Var / Comp / "
+            "Check stars for all following steps; GOTO V/C/K, the MEASURE/SKY "
+            "defaults and ABORT_IF then use the new target. Params may add "
+            "id=auid (or id=name) to force which catalog field is matched."),
+        "MEASURE": (
+            "MEASURE",
+            "MEASURE, filter=V, integ=5, interval=3, gain=10",
+            "Take one PEP measurement. Every field is optional; omitted fields "
+            "inherit the current main-window setting. Params: filter=, gain= "
+            "(1/10/100), integ= (seconds), interval= (counts, 1-8)."),
+        "SKY": (
+            "SKY",
+            "SKY, label=SKYLAST, filter=V [, offset=dRA,dDec, plate_solve=0]",
+            "Take a sky reading; label is SKY, SKYNEXT or SKYLAST. An optional "
+            "offset slews to an RA/Dec offset from the target first. Params: "
+            "filter=, gain=, integ=, interval=, offset=, plate_solve=0/1."),
+        "FILTER": (
+            "FILTER",
+            "FILTER, B",
+            "Change the filter (auto mode moves the slider; manual mode just "
+            "records it). Value = the filter name on the active bar."),
+        "WAIT": (
+            "WAIT",
+            "WAIT, 30",
+            "Pause for the given number of seconds; the UI keeps responding "
+            "during the wait."),
+        "WAIT_UNTIL": (
+            "WAIT_UNTIL",
+            "WAIT_UNTIL, 2026-11-27 02:45:00",
+            "Wait until that absolute UTC date/time. If it is <= 30 min in the "
+            "past it proceeds with a warning; if > 30 min in the past it stops "
+            "the run with a warning."),
+        "ABORT_IF": (
+            "ABORT_IF",
+            "ABORT_IF, airmass_above=2.5 | ABORT_IF, alt_below=15",
+            "Stop the run if the target is above that airmass or below that "
+            "altitude. Skipped when the observer location is not set (0,0)."),
+        "REPEAT": (
+            "REPEAT",
+            "REPEAT, 6 ... END",
+            "Repeat the block of steps up to the matching END the given number "
+            "of times. Value = the repeat count."),
+        "END": (
+            "END",
+            "END",
+            "Close the current REPEAT block."),
+    }
+
+    def __init__(self, sequence=None, sequences_dir=None, night_mode=None,
+                 catalog=None):
         if ssp_sequence is None:
             raise Exception("ssp_sequence module not available")
         self.sequence = sequence if sequence is not None else ssp_sequence.PEPSequence("New")
         self.sequences_dir = sequences_dir
         self.night_mode = night_mode
+        self.catalog = catalog
         self.run_requested = False
         self._loading_fields = False
+        # Last kind the user selected; used to clear the Value/Label/Params
+        # boxes when the Kind changes (see _on_kind_changed).
+        self._last_kind = None
 
         self.Text = "Edit Sequence"
         self.Width = 720
@@ -882,17 +955,23 @@ class SequenceDialog(Form):
         self.MinimizeBox = False
 
         self._build_ui()
-        self.kind_combo.SelectedIndex = 1   # default kind: MEASURE
+        self.kind_combo.SelectedIndex = self.KINDS.index("MEASURE")  # default kind
         self._refresh_sequence_list()
         self._refresh_steps()
         self._write_runlength()
         self._on_kind_changed(None, None)
+        # Validate TARGET objects once the window is on screen (so any warning
+        # is parented to a visible dialog).
+        self.Shown += self._on_shown
 
         if self.night_mode is not None:
             try:
                 self.night_mode.apply_to_form(self)
             except Exception:
                 pass
+
+    def _on_shown(self, sender, event):
+        self._check_targets()
 
     def _build_ui(self):
         # Row 1 - saved-sequence picker + file buttons
@@ -974,18 +1053,24 @@ class SequenceDialog(Form):
         add_field(1, "Value:", self.value_box, 310)
 
         self.label_box = TextBox()
-        add_field(2, "Label:", self.label_box, 160)
+        add_field(2, "Label:", self.label_box, 310)
 
         self.params_box = TextBox()
         add_field(3, "Params:", self.params_box, 310)
 
-        hint = Label()
-        hint.Text = ("Value: GOTO -> V/C/K, RA,Dec or OFFSET,dRA,dDec | FILTER -> name\n"
-                     "WAIT -> seconds | WAIT_UNTIL -> YYYY-MM-DD HH:MM:SS | REPEAT -> count\n"
-                     "Params: k=v pairs, e.g. filter=V, integ=5, interval=3")
-        hint.Location = Point(82, 150)
-        hint.Size = Size(300, 46)
-        group.Controls.Add(hint)
+        # Command help box - shows the syntax and "what it does" text for the
+        # currently selected Kind. Line 1 = Command, line 2 = Syntax, lines 3+
+        # = what it does. Refreshed by _update_help() whenever the Kind changes.
+        self.help_box = TextBox()
+        self.help_box.Location = Point(12, 146)
+        self.help_box.Size = Size(372, 116)
+        self.help_box.Multiline = True
+        self.help_box.ReadOnly = True
+        self.help_box.WordWrap = True
+        self.help_box.ScrollBars = ScrollBars.Vertical
+        self.help_box.TabStop = False
+        self.help_box.Font = Font("Courier New", 8)
+        group.Controls.Add(self.help_box)
 
         # Row 3 - run length (units are as labelled; minutes = wall-clock)
         run_label = Label()
@@ -1040,6 +1125,9 @@ class SequenceDialog(Form):
     def _refresh_sequence_list(self):
         if ssp_sequence is None:
             return
+        # ComboBox.Items.Clear() resets the edit text, which would blank the
+        # Sequence box (and so the name Save As uses). Preserve and restore it.
+        current = self.seq_combo.Text
         names = []
         if self.sequences_dir:
             try:
@@ -1056,6 +1144,8 @@ class SequenceDialog(Form):
         for name in templates:
             if name not in names:
                 self.seq_combo.Items.Add(name)
+        if current:
+            self.seq_combo.Text = current
 
     def _refresh_steps(self):
         self._loading_fields = True
@@ -1107,11 +1197,21 @@ class SequenceDialog(Form):
         self._refresh_steps()
         self._write_runlength()
         self._set_status("Loaded '%s'" % seq.name)
+        self._check_targets()
 
     def _on_save(self, sender, event):
-        name = self._current_name()
+        """Save the sequence under the name in the Sequence box (Save As)."""
+        name = self._current_name() or (self.sequence.name or '').strip()
         if not name:
             self._set_status("Enter a sequence name to save")
+            MessageBox.Show(
+                "Type a name in the 'Sequence:' box, then click Save As.",
+                "Save Sequence", MessageBoxButtons.OK,
+                MessageBoxIcon.Information)
+            try:
+                self.seq_combo.Focus()
+            except Exception:
+                pass
             return
         self.sequence.name = name
         self._read_runlength()
@@ -1121,8 +1221,13 @@ class SequenceDialog(Form):
             MessageBox.Show("Could not save sequence:\n" + str(e), "Save Sequence",
                             MessageBoxButtons.OK, MessageBoxIcon.Error)
             return
-        self._refresh_sequence_list()
-        self.seq_combo.Text = name
+        # Reflect the new name in the picker (guarded so a UI hiccup cannot
+        # swallow the success message).
+        try:
+            self._refresh_sequence_list()
+            self.seq_combo.Text = name
+        except Exception:
+            pass
         self._set_status("Saved '%s'" % name)
 
     def _on_delete(self, sender, event):
@@ -1145,14 +1250,106 @@ class SequenceDialog(Form):
         return str(self.kind_combo.Text or 'GOTO').upper()
 
     def _on_kind_changed(self, sender, event):
-        """Enable/disable the value/label/params boxes for the selected kind."""
+        """Reset and enable/disable the fields for the selected kind.
+
+        When the Kind actually changes, the Value/Label/Params boxes are cleared
+        so stale values from the previous command do not carry over (and are not
+        left sitting in a now-disabled box). Programmatic changes while loading
+        a step (_loading_fields / _populate_fields) do not clear them.
+        """
         if self._loading_fields:
             return
         kind = self._kind()
-        self.value_box.Enabled = kind in ('GOTO', 'FILTER', 'WAIT',
+        if kind != self._last_kind:
+            self.value_box.Text = ''
+            self.label_box.Text = ''
+            self.params_box.Text = ''
+            self._last_kind = kind
+        self.value_box.Enabled = kind in ('GOTO', 'TARGET', 'FILTER', 'WAIT',
                                           'WAIT_UNTIL', 'REPEAT')
         self.label_box.Enabled = (kind == 'SKY')
-        self.params_box.Enabled = kind in ('GOTO', 'MEASURE', 'SKY', 'ABORT_IF')
+        self.params_box.Enabled = kind in ('GOTO', 'TARGET', 'MEASURE', 'SKY',
+                                           'ABORT_IF')
+        self._update_help()
+
+    def _check_targets(self):
+        """Warn (non-blocking) if any TARGET step references an unknown object.
+
+        Called when the editor opens and whenever a sequence is loaded, per the
+        "check the catalog on edit/load" requirement.
+        """
+        if ssp_sequence is None:
+            return
+        try:
+            missing = ssp_sequence.missing_catalog_targets(self.sequence,
+                                                           self.catalog)
+        except Exception:
+            return
+        if missing is None:
+            # No catalog loaded: every TARGET step is unverifiable, so report
+            # them all (the caller still wants a warning in that case).
+            try:
+                missing = [(idx, ident) for idx, ident, _t
+                           in ssp_sequence.find_target_steps(self.sequence)]
+            except Exception:
+                missing = []
+        if not missing:
+            return
+        listing = "\n".join("%d. %s" % (idx, ident) for idx, ident in missing)
+        MessageBox.Show(
+            "These TARGET objects are not in the loaded star catalog:\n\n"
+            + listing +
+            "\n\nThey will be skipped at run time unless the catalog is updated.",
+            "Unknown Targets", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        self._set_status("Warning: %d TARGET object(s) not in catalog"
+                         % len(missing))
+
+    def _check_one_target(self, step):
+        """Warn (non-blocking) if a single TARGET step's object is unknown.
+
+        Called when a step is added or updated in the editor, so the catalog is
+        checked as soon as the TARGET command is entered. A valid object is
+        silent; an unknown (or unverifiable) one shows a warning.
+        """
+        if ssp_sequence is None or step is None or step.kind != 'TARGET':
+            return
+        ident = str(step.params.get('object') or '').strip()
+        if not ident:
+            return
+        try:
+            catalog_loaded = bool(self.catalog) and self.catalog.get_count() > 0
+        except Exception:
+            catalog_loaded = False
+        if catalog_loaded:
+            target = ssp_sequence.resolve_catalog_target(
+                self.catalog, ident, step.params.get('id_type'))
+            if target is not None:
+                return
+            message = ("TARGET object '%s' is not in the loaded star catalog.\n\n"
+                       "It will be skipped at run time unless the catalog is "
+                       "updated." % ident)
+        else:
+            message = ("TARGET object '%s' cannot be verified - no star catalog "
+                       "is loaded.\n\nIt will be skipped at run time unless the "
+                       "catalog is loaded." % ident)
+        MessageBox.Show(message, "Unknown Target",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        self._set_status("Warning: TARGET '%s' not in catalog" % ident)
+
+    def _update_help(self):
+        """Refresh the help box for the currently selected Kind.
+
+        Line 1 = Command, line 2 = Syntax, lines 3+ = "what it does".
+        """
+        if not hasattr(self, 'help_box'):
+            return
+        kind = self._kind()
+        command, syntax, what = self.COMMAND_HELP.get(
+            kind, (kind, kind, "No help available for this command."))
+        self.help_box.Text = "\r\n".join(
+            ("Command: %s" % command,
+             "Syntax: %s" % syntax,
+             "What it does: %s" % what))
 
     def _build_step_from_fields(self):
         return ssp_sequence.step_from_fields(
@@ -1166,7 +1363,11 @@ class SequenceDialog(Form):
             try:
                 self.kind_combo.SelectedIndex = self.KINDS.index(kind)
             except ValueError:
-                self.kind_combo.SelectedIndex = 1
+                self.kind_combo.SelectedIndex = self.KINDS.index("MEASURE")
+            # Record the kind so the trailing _on_kind_changed() call does not
+            # treat this programmatic change as a user Kind change and clear the
+            # fields we just populated.
+            self._last_kind = self._kind()
             self.value_box.Text = str(value)
             self.label_box.Text = str(label)
             self.params_box.Text = str(params)
@@ -1187,16 +1388,19 @@ class SequenceDialog(Form):
         self._refresh_steps()
         self.steps_list.SelectedIndex = len(self.sequence.steps) - 1
         self._set_status("Added %s" % step.kind)
+        self._check_one_target(step)
 
     def _on_update(self, sender, event):
         idx = self.steps_list.SelectedIndex
         if not (0 <= idx < len(self.sequence.steps)):
             self._set_status("Select a step to update")
             return
-        self.sequence.steps[idx] = self._build_step_from_fields()
+        step = self._build_step_from_fields()
+        self.sequence.steps[idx] = step
         self._refresh_steps()
         self.steps_list.SelectedIndex = idx
         self._set_status("Updated step %d" % (idx + 1))
+        self._check_one_target(step)
 
     def _on_remove(self, sender, event):
         idx = self.steps_list.SelectedIndex
@@ -1256,6 +1460,199 @@ class SequenceDialog(Form):
         self.Close()
 
     def _on_close(self, sender, event):
+        self.DialogResult = DialogResult.Cancel
+        self.Close()
+
+
+class CountdownWarningDialog(Form):
+    """Modal warning that auto-proceeds after a countdown, unless cancelled.
+
+    Used by the sequence pre-flight: when one or more TARGET objects are missing
+    from the catalog the run is announced and the user has ``seconds`` to cancel.
+    ``ShowDialog`` returns ``DialogResult.OK`` when the countdown reaches zero
+    (the caller proceeds with the run) or ``DialogResult.Cancel`` if the user
+    clicks Cancel (the caller aborts and nothing runs).
+    """
+
+    def __init__(self, message, title="Sequence Warning", seconds=10,
+                 details=None, night_mode=None):
+        self._remaining = max(0, int(seconds))
+        self._total = self._remaining
+
+        self.Text = title
+        self.Width = 580
+        self.Height = 320
+        self.MinimumSize = Size(520, 280)
+        self.StartPosition = FormStartPosition.CenterParent
+        self.FormBorderStyle = FormBorderStyle.Sizable
+        self.MaximizeBox = False
+        self.MinimizeBox = False
+        self.DialogResult = DialogResult.Cancel   # safe default (X = abort)
+
+        header = Label()
+        header.Text = message
+        header.Location = Point(12, 12)
+        header.Size = Size(544, 44)
+        self.Controls.Add(header)
+
+        detail = TextBox()
+        detail.Location = Point(12, 60)
+        detail.Size = Size(544, 150)
+        detail.Multiline = True
+        detail.ReadOnly = True
+        detail.WordWrap = True
+        detail.ScrollBars = ScrollBars.Vertical
+        detail.TabStop = False
+        detail.Text = details or ""
+        self.Controls.Add(detail)
+
+        self.countdown_label = Label()
+        self.countdown_label.Location = Point(12, 222)
+        self.countdown_label.Size = Size(360, 24)
+        self.countdown_label.Font = Font(self.Font, FontStyle.Bold)
+        self.Controls.Add(self.countdown_label)
+
+        cancel_btn = Button()
+        cancel_btn.Text = "Cancel Run"
+        cancel_btn.Location = Point(452, 218)
+        cancel_btn.Size = Size(104, 30)
+        cancel_btn.Click += self._on_cancel
+        self.Controls.Add(cancel_btn)
+        self.AcceptButton = cancel_btn
+        self.CancelButton = cancel_btn
+
+        self._timer = Timer()
+        self._timer.Interval = 1000
+        self._timer.Tick += self._on_tick
+
+        self._update_label()
+        # Start the countdown once the dialog is actually on screen, so the
+        # first second is not lost while the window is still opening.
+        self.Shown += self._on_shown
+
+        if night_mode is not None:
+            try:
+                night_mode.apply_to_form(self)
+            except Exception:
+                pass
+
+    def _update_label(self):
+        if self._remaining > 0:
+            self.countdown_label.Text = (
+                "Starting in %d s  -  click 'Cancel Run' to abort."
+                % self._remaining)
+        else:
+            self.countdown_label.Text = "Starting now..."
+
+    def _on_shown(self, sender, event):
+        if self._remaining <= 0:
+            self.DialogResult = DialogResult.OK
+            self.Close()
+            return
+        self._timer.Start()
+
+    def _on_tick(self, sender, event):
+        self._remaining -= 1
+        self._update_label()
+        if self._remaining <= 0:
+            self._timer.Stop()
+            self.DialogResult = DialogResult.OK
+            self.Close()
+
+    def _on_cancel(self, sender, event):
+        try:
+            self._timer.Stop()
+        except Exception:
+            pass
+        self.DialogResult = DialogResult.Cancel
+        self.Close()
+
+
+class SequencePickerDialog(Form):
+    """Pick a saved sequence (or a built-in template) to load.
+
+    After ShowDialog(), ``selected_name`` holds the chosen sequence name (or
+    None if the user cancelled). Saved sequences are listed first, then the
+    built-in templates (suffixed with '  (template)').
+    """
+
+    def __init__(self, saved_names, template_names, night_mode=None,
+                 title="Load Sequence"):
+        self.selected_name = None
+        self._map = {}          # list item text -> real sequence name
+
+        self.Text = title
+        self.Width = 440
+        self.Height = 430
+        self.MinimumSize = Size(360, 300)
+        self.StartPosition = FormStartPosition.CenterParent
+        self.FormBorderStyle = FormBorderStyle.Sizable
+        self.MaximizeBox = False
+        self.MinimizeBox = False
+        self.DialogResult = DialogResult.Cancel   # safe default (X = cancel)
+
+        label = Label()
+        label.Text = "Select a sequence to load:"
+        label.Location = Point(12, 12)
+        label.Size = Size(404, 20)
+        self.Controls.Add(label)
+
+        self.list_box = ListBox()
+        self.list_box.Location = Point(12, 38)
+        self.list_box.Size = Size(404, 300)
+        self.list_box.DoubleClick += self._on_ok
+        self.Controls.Add(self.list_box)
+
+        for name in (saved_names or []):
+            self.list_box.Items.Add(name)
+            self._map[name] = name
+        for name in (template_names or []):
+            display = "%s  (template)" % name
+            self.list_box.Items.Add(display)
+            self._map[display] = name
+
+        if self.list_box.Items.Count == 0:
+            self.list_box.Items.Add("(no saved sequences)")
+            self.list_box.Enabled = False
+        else:
+            self.list_box.SelectedIndex = 0
+
+        ok_btn = Button()
+        ok_btn.Text = "Load"
+        ok_btn.Location = Point(236, 350)
+        ok_btn.Size = Size(84, 28)
+        ok_btn.Click += self._on_ok
+        self.Controls.Add(ok_btn)
+
+        cancel_btn = Button()
+        cancel_btn.Text = "Cancel"
+        cancel_btn.Location = Point(330, 350)
+        cancel_btn.Size = Size(84, 28)
+        cancel_btn.Click += self._on_cancel
+        self.Controls.Add(cancel_btn)
+
+        self.AcceptButton = ok_btn
+        self.CancelButton = cancel_btn
+
+        if night_mode is not None:
+            try:
+                night_mode.apply_to_form(self)
+            except Exception:
+                pass
+
+    def _on_ok(self, sender, event):
+        try:
+            display = self.list_box.SelectedItem
+        except Exception:
+            display = None
+        name = self._map.get(str(display)) if display is not None else None
+        if not name:
+            return
+        self.selected_name = name
+        self.DialogResult = DialogResult.OK
+        self.Close()
+
+    def _on_cancel(self, sender, event):
         self.DialogResult = DialogResult.Cancel
         self.Close()
 

@@ -11,7 +11,7 @@ A sequence is an ordered list of SequenceStep objects plus run-length limits
 (``max_minutes`` / ``max_observations``) and an optional pass cap (``repeat``).
 
 Step kinds (see SEQUENCER_DEVELOPMENT.md SS3.2):
-    GOTO, MEASURE, SKY, FILTER, WAIT, WAIT_UNTIL, ABORT_IF, REPEAT, END
+    GOTO, TARGET, MEASURE, SKY, FILTER, WAIT, WAIT_UNTIL, ABORT_IF, REPEAT, END
 
 Formats:
     * .ssp-style text: comma-separated "COMMAND,value" (legacy-compatible)
@@ -93,11 +93,48 @@ def _to_float(value, default=None):
         return default
 
 
-_OFFSET_RE = re.compile(r'offset\s*=\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)')
+def _to_bool_int(value):
+    """Return 1/0 for truthy/falsey text, else None.
+
+    Accepts 1/0, true/false, yes/no, on/off (case-insensitive) so a step can
+    carry e.g. 'plate_solve=0' without needing a dedicated UI control.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int):
+        return 1 if value else 0
+    text = str(value).strip().lower()
+    if text in ('1', 'true', 'yes', 'on', 'y'):
+        return 1
+    if text in ('0', 'false', 'no', 'off', 'n'):
+        return 0
+    return None
+
+
+# An RA/Dec offset, written 'offset=dRA,dDec' (canonical) or 'OFFSET,dRA,dDec'
+# (legacy GOTO spelling). Used for SKY/MEASURE params and for GOTO (in the Value
+# box, the editor Params box, or the .ssp text), so the syntax is identical for
+# every command that carries an offset.
+_OFFSET_RE = re.compile(
+    r'\boffset\b\s*[=,]?\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)', re.IGNORECASE)
+
+# A per-step 'plate_solve=0/1' flag; pulled out before GOTO's comma split so it
+# does not become a spurious coordinate part.
+_GOTO_FLAG_RE = re.compile(r'plate_solve\s*=\s*([^,\s]+)', re.IGNORECASE)
+
+# A TARGET identifier may be a plain object name / AUID, or be prefixed with
+# 'name=' / 'auid=' to force which catalog field is matched.
+_TARGET_ID_RE = re.compile(r'^\s*(name|auid)\s*=\s*(.+)$', re.IGNORECASE)
+
+# ...or carry a trailing ', id=name' / ', id=auid' token (the editor's Params box).
+_TARGET_FLAG_RE = re.compile(r'id\s*=\s*(name|auid)\b', re.IGNORECASE)
 
 # Keys coerced to numbers when a MEASURE/SKY step is built
 _MEASURE_FLOATS = ('integ', 'd_ra_h', 'd_dec_deg', 'ra', 'dec')
 _MEASURE_INTS = ('gain', 'interval', 'seconds', 'count')
+_BOOL_KEYS = ('plate_solve',)
 
 
 def _parse_kv(rest):
@@ -128,7 +165,10 @@ def _coerce_measure(params):
     """Coerce known MEASURE/SKY keys to int/float; leave the rest as strings."""
     out = {}
     for key, value in params.items():
-        if key in _MEASURE_FLOATS:
+        if key in _BOOL_KEYS:
+            coerced = _to_bool_int(value)
+            out[key] = coerced if coerced is not None else value
+        elif key in _MEASURE_FLOATS:
             out[key] = _to_float(value, value)
         elif key in _MEASURE_INTS:
             out[key] = _to_int(value, value)
@@ -139,16 +179,92 @@ def _coerce_measure(params):
 # --- .ssp-style text parsing -------------------------------------------------
 
 def _parse_goto(rest):
-    """Build a GOTO step from 'V' | 'RA,Dec' | 'OFFSET,d_ra,d_dec'."""
+    """Build a GOTO step from the .ssp text after 'GOTO,'.
+
+    Accepted forms (an optional 'plate_solve=0/1' token may follow any of them):
+        'V' / 'C' / 'K' / 'SKY' / 'OFFSET'   star reference
+        'RA,Dec'                              absolute coordinates
+        'V, offset=dRA,dDec'                  star + RA/Dec offset
+        'RA,Dec, offset=dRA,dDec'             coords + RA/Dec offset
+        'V, dRA, dDec'      (legacy)          star + offset
+        'OFFSET, dRA, dDec' (legacy)          offset from the variable star
+
+    'offset=dRA,dDec' is pulled out before the comma split (its inner comma would
+    otherwise be mistaken for a coordinate separator); the 'plate_solve' token is
+    pulled out the same way.
+    """
+    rest = rest or ''
+    flag = None
+    match = _GOTO_FLAG_RE.search(rest)
+    if match:
+        flag = _to_bool_int(match.group(1))
+        rest = rest[:match.start()] + rest[match.end():]
+    offset = None
+    off_match = _OFFSET_RE.search(rest)
+    if off_match:
+        offset = (_to_float(off_match.group(1), 0.0),
+                  _to_float(off_match.group(2), 0.0))
+        rest = rest[:off_match.start()] + rest[off_match.end():]
     parts = [p.strip() for p in rest.split(',') if p.strip() != '']
     if not parts:
-        return SequenceStep('GOTO', star_ref='V')
-    if len(parts) == 1:
-        return SequenceStep('GOTO', star_ref=parts[0].upper())
-    if len(parts) == 2:
-        return SequenceStep('GOTO', ra=_to_float(parts[0]), dec=_to_float(parts[1]))
-    return SequenceStep('GOTO', star_ref=parts[0].upper(),
-                        d_ra_h=_to_float(parts[1]), d_dec_deg=_to_float(parts[2]))
+        step = SequenceStep('GOTO', star_ref='OFFSET' if offset else 'V')
+    elif len(parts) == 1:
+        step = SequenceStep('GOTO', star_ref=parts[0].upper())
+    elif len(parts) == 2:
+        step = SequenceStep('GOTO', ra=_to_float(parts[0]), dec=_to_float(parts[1]))
+    elif len(parts) == 3:
+        # legacy star/ref plus an RA/Dec offset (e.g. 'V,0.0,0.25')
+        step = SequenceStep('GOTO', star_ref=parts[0].upper(),
+                            d_ra_h=_to_float(parts[1]), d_dec_deg=_to_float(parts[2]))
+    else:
+        # legacy absolute RA/Dec plus an RA/Dec offset ('12.5,-30.25,0.0,0.25')
+        step = SequenceStep('GOTO', ra=_to_float(parts[0]), dec=_to_float(parts[1]),
+                            d_ra_h=_to_float(parts[2]), d_dec_deg=_to_float(parts[3]))
+    if offset is not None:
+        step.params['d_ra_h'] = offset[0]
+        step.params['d_dec_deg'] = offset[1]
+    if flag is not None:
+        step.params['plate_solve'] = flag
+    return step
+
+
+def _parse_goto_offset_values(text):
+    """Return (d_ra_h, d_dec_deg) from an OFFSET/offset spec in `text`, else None.
+
+    Accepts 'OFFSET,dRA,dDec' and 'offset=dRA,dDec' (optionally surrounded by
+    other params such as 'plate_solve=0'). Used to apply an offset typed in the
+    editor Params box on top of whatever the Value box resolves to (a star,
+    absolute coords, or nothing = offset from the current target).
+    """
+    match = _OFFSET_RE.search(text or '')
+    if not match:
+        return None
+    return (_to_float(match.group(1), 0.0), _to_float(match.group(2), 0.0))
+
+
+def _parse_target(rest):
+    """Build a TARGET step from '<identifier>' or 'name=..' / 'auid=..'.
+
+    The identifier is a catalog object name (e.g. 'OMI CET') or an AUID (e.g.
+    '000-BBW-425'). When no type is given the resolver tries the name first and
+    then the AUID, so most sequences can simply use the plain name. A trailing
+    ', id=name' / ', id=auid' token is also accepted (mirrors the editor Params
+    box); an explicit type wins over the auto behaviour.
+    """
+    text = (rest or '').strip()
+    id_type = None
+    match = _TARGET_ID_RE.match(text)
+    if match:
+        id_type = match.group(1).lower()
+        text = match.group(2).strip()
+    flag = _TARGET_FLAG_RE.search(text)
+    if flag:
+        if id_type is None:
+            id_type = flag.group(1).lower()
+        text = (text[:flag.start()] + text[flag.end():]).strip().strip(',').strip()
+    if not text:
+        raise SequenceParseError("TARGET requires an object name or AUID")
+    return SequenceStep('TARGET', object=text, id_type=id_type)
 
 
 def _merge_pending(params, pending):
@@ -172,6 +288,8 @@ def _apply_command(seq, cmd, rest, pending):
         seq.steps.append(SequenceStep('END'))
     elif cmd == 'GOTO':
         seq.steps.append(_parse_goto(rest))
+    elif cmd == 'TARGET':
+        seq.steps.append(_parse_target(rest))
     elif cmd in ('MEASURE', 'COUNT'):
         seq.steps.append(SequenceStep('MEASURE',
                                       **_coerce_measure(_merge_pending(_parse_kv(rest), pending))))
@@ -245,29 +363,85 @@ def _fmt_num(value):
     return str(value)
 
 
+# RA/Dec coordinates and offsets are shown with a fixed precision so the editor
+# never displays the full binary float expansion (e.g. 0.10000000000000001 that
+# IronPython's str(float) can produce). Six decimals matches the clipboard
+# coordinate format used elsewhere in the app.
+_COORD_KEYS = ('ra', 'dec', 'd_ra_h', 'd_dec_deg')
+_COORD_DECIMALS = 6
+
+
+def _fmt_coord(value, places=_COORD_DECIMALS):
+    """Format an RA/Dec value or offset with at most ``places`` decimals.
+
+    0.10000000000000001 -> '0.1', 0.25 -> '0.25', 0.0 -> '0'. Non-numeric
+    input is returned unchanged (str) so hand-edited text is preserved.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    text = ("%%.%df" % places) % number
+    if '.' in text:
+        text = text.rstrip('0').rstrip('.')
+    return text or '0'
+
+
+def _fmt_value(key, value):
+    """Format one param value (RA/Dec keys get a fixed precision)."""
+    if key in _COORD_KEYS:
+        return _fmt_coord(value)
+    return str(value)
+
+
 def _kv_suffix(params):
     """Render a param dict as ', k=v, k=v' (sorted for stable output)."""
     if not params:
         return ""
-    return ", " + ", ".join("%s=%s" % (k, params[k]) for k in sorted(params))
+    return ", " + ", ".join("%s=%s" % (k, _fmt_value(k, params[k]))
+                            for k in sorted(params))
 
 
 def _step_to_text(step):
     kind = step.kind
     params = step.params
     if kind == 'GOTO':
+        extra = (", plate_solve=%d" % int(params['plate_solve'])
+                 if 'plate_solve' in params else "")
+        has_offset = ('d_ra_h' in params) or ('d_dec_deg' in params)
         if 'ra' in params and 'dec' in params:
-            return "GOTO, %s,%s" % (params['ra'], params['dec'])
-        if 'd_ra_h' in params or 'd_dec_deg' in params:
-            return "GOTO, OFFSET,%s,%s" % (params.get('d_ra_h', 0),
-                                           params.get('d_dec_deg', 0))
-        return "GOTO, %s" % params.get('star_ref', 'V')
+            target = "%s,%s" % (_fmt_coord(params['ra']),
+                                _fmt_coord(params['dec']))
+        else:
+            ref = str(params.get('star_ref', 'V')).upper()
+            # OFFSET/SKY with an offset is the default "offset from the
+            # variable star" target, so the reference itself is omitted.
+            target = '' if (has_offset and ref in ('OFFSET', 'SKY')) else ref
+        parts_out = []
+        if target:
+            parts_out.append(target)
+        if has_offset:
+            parts_out.append("offset=%s,%s" % (
+                _fmt_coord(params.get('d_ra_h', 0)),
+                _fmt_coord(params.get('d_dec_deg', 0))))
+        if not parts_out:
+            parts_out.append(str(params.get('star_ref', 'V')).upper())
+        return "GOTO, " + ", ".join(parts_out) + extra
+    if kind == 'TARGET':
+        ident = params.get('object') or ''
+        id_type = params.get('id_type')
+        prefix = ("%s=" % id_type) if id_type else ""
+        return "TARGET, %s%s" % (prefix, ident)
     if kind == 'MEASURE':
         return "MEASURE" + _kv_suffix(params)
     if kind == 'SKY':
         rest = dict(params)
         label = rest.pop('label', 'SKYLAST')
-        return "SKY, label=%s%s" % (label, _kv_suffix(rest))
+        offset_text = ""
+        if ('d_ra_h' in rest) or ('d_dec_deg' in rest):
+            offset_text = ", offset=%s,%s" % (_fmt_coord(rest.pop('d_ra_h', 0)),
+                                              _fmt_coord(rest.pop('d_dec_deg', 0)))
+        return "SKY, label=%s%s%s" % (label, offset_text, _kv_suffix(rest))
     if kind == 'FILTER':
         return "FILTER, %s" % (params.get('filter') or '')
     if kind == 'WAIT':
@@ -391,7 +565,8 @@ def build_templates():
 
 def _kv_text(params):
     """Render a param dict as 'k=v, k=v' (sorted, for the dialog field)."""
-    return ", ".join("%s=%s" % (k, params[k]) for k in sorted(params))
+    return ", ".join("%s=%s" % (k, _fmt_value(k, params[k]))
+                     for k in sorted(params))
 
 
 def format_step(step, index=None):
@@ -404,16 +579,51 @@ def step_from_fields(kind, value="", label="", params_text=""):
     """Build a SequenceStep from the dialog's fields.
 
     Args:
-        kind: step kind (GOTO / MEASURE / SKY / FILTER / WAIT / WAIT_UNTIL /
-              ABORT_IF / REPEAT / END)
-        value: kind-specific primary field (GOTO star or coords, FILTER name,
-               WAIT seconds, WAIT_UNTIL datetime, REPEAT count)
+        kind: step kind (GOTO / TARGET / MEASURE / SKY / FILTER / WAIT /
+              WAIT_UNTIL / ABORT_IF / REPEAT / END)
+        value: kind-specific primary field (GOTO star or coords, TARGET object
+               name/AUID, FILTER name, WAIT seconds, WAIT_UNTIL datetime,
+               REPEAT count)
         label: SKY label (SKY/SKYNEXT/SKYLAST)
-        params_text: 'k=v, k=v' pairs (MEASURE/SKY/ABORT_IF, or GOTO coords)
+        params_text: 'k=v, k=v' pairs (MEASURE/SKY/ABORT_IF, GOTO coords, or
+                     TARGET 'id=auid')
     """
     kind = str(kind).upper()
     if kind == 'GOTO':
-        return _parse_goto((value or params_text or 'V').strip())
+        # Value holds the target (V/C/K, RA,Dec, OFFSET,dRA,dDec, or blank);
+        # the Params box may add an RA/Dec offset ('OFFSET,dRA,dDec' or
+        # 'offset=dRA,dDec') and/or 'plate_solve=0/1'. Both are respected: the
+        # offset is applied ON TOP of the Value, so 'GOTO V' + an offset gives
+        # 'GOTO, V, dRA, dDec'. With a blank Value the offset is taken from the
+        # current target's variable star ('GOTO, OFFSET, dRA, dDec').
+        params_kv = _parse_kv(params_text)
+        offset = _parse_goto_offset_values(params_text)
+        if value and value.strip():
+            step = _parse_goto(value.strip())
+        elif offset is not None:
+            step = SequenceStep('GOTO', star_ref='OFFSET')
+        else:
+            step = _parse_goto('V')
+        if offset is not None:
+            step.params['d_ra_h'] = offset[0]
+            step.params['d_dec_deg'] = offset[1]
+        flag = _to_bool_int(params_kv.get('plate_solve'))
+        if flag is not None:
+            step.params['plate_solve'] = flag
+        return step
+    if kind == 'TARGET':
+        # Value holds the object name or AUID (optionally 'auid=..' / 'name=..');
+        # the Params box may add 'id=auid' to force AUID matching.
+        text = (value or '').strip()
+        id_type = None
+        match = _TARGET_ID_RE.match(text)
+        if match:
+            id_type = match.group(1).lower()
+            text = match.group(2).strip()
+        forced = (_parse_kv(params_text).get('id') or '').strip().lower()
+        if forced in ('name', 'auid'):
+            id_type = forced
+        return SequenceStep('TARGET', object=(text or None), id_type=id_type)
     if kind == 'MEASURE':
         return SequenceStep('MEASURE', **_coerce_measure(_parse_kv(params_text)))
     if kind == 'SKY':
@@ -441,19 +651,35 @@ def fields_from_step(step):
     params = step.params
     if kind == 'GOTO':
         if 'ra' in params and 'dec' in params:
-            value = "%s,%s" % (params['ra'], params['dec'])
-        elif 'd_ra_h' in params or 'd_dec_deg' in params:
-            value = "OFFSET,%s,%s" % (params.get('d_ra_h', 0),
-                                      params.get('d_dec_deg', 0))
+            value = "%s,%s" % (_fmt_coord(params['ra']),
+                               _fmt_coord(params['dec']))
         else:
-            value = params.get('star_ref', 'V')
-        return (kind, value, '', '')
+            ref = str(params.get('star_ref', 'V')).upper()
+            # An OFFSET/SKY reference with no explicit star is an offset-only
+            # step, so the Value box is left blank (the offset shows in Params).
+            value = '' if ref in ('OFFSET', 'SKY') else ref
+        extra = {}
+        if ('d_ra_h' in params) or ('d_dec_deg' in params):
+            extra['offset'] = "%s,%s" % (_fmt_coord(params.get('d_ra_h', 0)),
+                                         _fmt_coord(params.get('d_dec_deg', 0)))
+        if 'plate_solve' in params:
+            extra['plate_solve'] = int(params['plate_solve'])
+        return (kind, value, '', _kv_text(extra))
+    if kind == 'TARGET':
+        ident = params.get('object') or ''
+        id_type = params.get('id_type')
+        return (kind, ident, '', ("id=%s" % id_type) if id_type else '')
     if kind == 'MEASURE':
         return (kind, '', '', _kv_text(params))
     if kind == 'SKY':
         rest = dict(params)
         label = rest.pop('label', 'SKYLAST')
-        return (kind, '', label, _kv_text(rest))
+        extra = {}
+        if ('d_ra_h' in rest) or ('d_dec_deg' in rest):
+            extra['offset'] = "%s,%s" % (_fmt_coord(rest.pop('d_ra_h', 0)),
+                                         _fmt_coord(rest.pop('d_dec_deg', 0)))
+        extra.update(rest)
+        return (kind, '', label, _kv_text(extra))
     if kind == 'FILTER':
         return (kind, params.get('filter') or '', '', '')
     if kind == 'WAIT':
@@ -465,6 +691,75 @@ def fields_from_step(step):
     if kind == 'REPEAT':
         return (kind, str(params.get('count', 1)), '', '')
     return (kind, '', '', '')
+
+# --- catalog target validation (shared by the editor and the runtime) --------
+
+def find_target_steps(seq):
+    """Return [(index, identifier, id_type), ...] for every TARGET step.
+
+    ``index`` is the 1-based position within ``seq.steps`` so the caller can
+    report exactly which step references an unknown object.
+    """
+    found = []
+    for i, step in enumerate(seq.steps):
+        if step.kind == 'TARGET':
+            found.append((i + 1, step.params.get('object') or '',
+                          step.params.get('id_type')))
+    return found
+
+
+def resolve_catalog_target(catalog, identifier, id_type=None):
+    """Resolve an identifier to a catalog TargetTriple (or None).
+
+    ``id_type`` may be 'name', 'auid', or None/'' (try the name first, then the
+    AUID). Returns None when the catalog is missing/empty or the identifier is
+    unknown. The catalog only needs ``get_count`` / ``get_target_by_name`` /
+    ``get_target_by_auid`` (i.e. ``ssp_catalog.StarCatalog``).
+    """
+    if catalog is None:
+        return None
+    try:
+        if catalog.get_count() == 0:
+            return None
+    except Exception:
+        return None
+    ident = str(identifier or '').strip()
+    if not ident:
+        return None
+    id_type = str(id_type or '').strip().lower()
+    try:
+        if id_type == 'auid':
+            return catalog.get_target_by_auid(ident)
+        if id_type == 'name':
+            return catalog.get_target_by_name(ident)
+        found = catalog.get_target_by_name(ident)
+        if found is None:
+            found = catalog.get_target_by_auid(ident)
+        return found
+    except Exception:
+        return None
+
+
+def missing_catalog_targets(seq, catalog):
+    """Return [(index, identifier), ...] for TARGET steps not in ``catalog``.
+
+    Returns ``None`` when the catalog is missing or empty, so the caller can
+    show a single "catalog not loaded" note instead of listing every target as
+    missing. An empty list means every referenced object resolved.
+    """
+    if catalog is None:
+        return None
+    try:
+        if catalog.get_count() == 0:
+            return None
+    except Exception:
+        return None
+    missing = []
+    for index, identifier, id_type in find_target_steps(seq):
+        if resolve_catalog_target(catalog, identifier, id_type) is None:
+            missing.append((index, identifier))
+    return missing
+
 
 # --- named sequence storage --------------------------------------------------
 

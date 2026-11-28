@@ -50,8 +50,9 @@ The desired user workflow is:
 - The built-in SharpCap Sequencer and any generator for it.
 - Fast / Very-Fast SSP modes (the engine drives the existing Slow/Trial paths).
 - Data reduction / magnitude calculation (unchanged; that is `ssp_allsky.py`).
-- Multi-target queue editing beyond the single selected Var/Comp/Check triple
-  (a future extension).
+- A full multi-target **queue editor**. (A single mid-run object switch *is*
+  supported by the `TARGET` step — see §3.2 / §17.2 — but building and editing
+  an ordered queue of targets in the UI remains a future extension.)
 
 ### 1.3 Why the built-in SharpCap Sequencer is out of scope
 
@@ -155,9 +156,10 @@ SharpCap's scripting host (or standalone). The modules relevant to sequencing:
 
 | Step | Parameters | Behaviour |
 |---|---|---|
-| `GOTO` | `star_ref` = `V` / `C` / `K` / `SKY` / `OFFSET`; optional `ra`,`dec`; optional `d_ra_h`,`d_dec_deg` | Slew via `_slew_to_star`. `V/C/K` resolve against `current_target`. `OFFSET` builds a pseudo-star from the current target ± delta. |
+| `GOTO` | `star_ref` = `V` / `C` / `K` / `SKY` / `OFFSET`; optional `ra`,`dec`; optional `d_ra_h`,`d_dec_deg`; optional `plate_solve` = `0`/`1` | Slew via `_slew_to_star`. `V/C/K` resolve against `current_target`; an optional `offset=dRA,dDec` (stored as `d_ra_h`/`d_dec_deg`) is applied **on top of** the resolved star, so `GOTO, V, offset=0,0.25` = variable star + offset (and `GOTO, offset=0,0.25` / `SKY` with no explicit star offset from the variable star). `plate_solve` overrides the global "Plate Solve and Sync" option for this step (e.g. `plate_solve=0` for a fast offset slew with no solve). |
+| `TARGET` | `object` (name or AUID), optional `id_type` = `name`/`auid` | Load a new catalog object into `current_target` via `_apply_target` (same path as `Catalog → Select Target Star`), so following `GOTO V/C/K`, the `MEASURE`/`SKY` defaults and `ABORT_IF` use the new triple. Unknown objects are skipped silently at run time; the editor/loader and the run pre-flight warn first (see §7.7). |
 | `MEASURE` | `object`, `catalog`, `filter`, `gain`, `integ`, `interval` | One PEP measurement via `take_reading(...)`. Missing fields inherit the current UI values. |
-| `SKY` | `label` = `SKY`/`SKYNEXT`/`SKYLAST`, plus the `MEASURE` params, optional `offset` | Sky reading. If `offset` is given, slew to the offset position first. |
+| `SKY` | `label` = `SKY`/`SKYNEXT`/`SKYLAST`, plus the `MEASURE` params, optional `offset`, optional `plate_solve` = `0`/`1` | Sky reading. If `offset` is given, slew to the offset position first; `plate_solve` overrides the global solve option for that slew. |
 | `WAIT` | `seconds` | Pause (pumps the UI). |
 | `WAIT_UNTIL` | `utc_datetime` (`YYYY-MM-DD HH:MM:SS`, UTC) | Pause until that UTC date/time. If it is already past by ≤ 30 min, proceed immediately with a warning; if more than 30 min past, stop the run with a warning. |
 | `FILTER` | `filter` | Change filter position (auto mode). |
@@ -778,28 +780,25 @@ horizon, which `ABORT_IF` treats as an abort.
 
 ### 7.5 Star resolution (`_resolve_step_star`)
 
-Maps a `GOTO`/`SKY` step to a `StarData` + a human label.
+Maps a `GOTO`/`SKY` step to a `StarData` + a human label. A star reference
+(`V`/`C`/`K`) or absolute `ra`/`dec` may be combined with an RA/Dec offset
+(`d_ra_h`/`d_dec_deg`, written `offset=dRA,dDec` in the `.ssp` text and editor);
+the offset is applied **on top of** the resolved base via `_offset_star`, so
+`GOTO, V, offset=0,0.25` = variable star + offset. `GOTO, offset=0,0.25` / `SKY`
+with no explicit star offset from the variable star.
 
 ```python
 def _resolve_step_star(self, step):
-    """Return (StarData, label) for a GOTO/OFFSET step, or (None, reason)."""
-    ref = str(step.params.get('star_ref', 'V')).upper()
-    if ref == 'V':
-        return (self.current_target.variable, "Variable") if self.current_target else (None, "no target")
-    if ref == 'C':
-        c = self.current_target.comparison if self.current_target else None
-        return (c, "Comparison") if c else (None, "no comparison star")
-    if ref == 'K':
-        k = self.current_target.check if self.current_target else None
-        return (k, "Check") if k else (None, "no check star")
-    if ref == 'SKY' or ref == 'OFFSET':
-        if 'ra' in step.params and 'dec' in step.params:
-            star = self._make_star_from_radec(step.params['ra'], step.params['dec'])
-        else:
-            star = self._make_offset_star(float(step.params.get('d_ra_h', 0.0)),
-                                          float(step.params.get('d_dec_deg', 0.0)))
-        return (star, "Sky offset") if star else (None, "no target for offset")
-    return (None, "unknown star_ref")
+    """Return (StarData, label) for a GOTO/SKY step, or (None, reason)."""
+    p = step.params
+    ref = str(p.get('star_ref', 'V')).upper()
+    has_offset = ('d_ra_h' in p) or ('d_dec_deg' in p)
+    # resolve the base star / coords (V/C/K/SKY/OFFSET or ra/dec) -> base, label
+    ...
+    if has_offset:
+        base = self._offset_star(base, float(p.get('d_ra_h', 0.0)),
+                                 float(p.get('d_dec_deg', 0.0)))
+    return (base, label)
 ```
 
 ### 7.6 Run pseudocode (end to end)
@@ -818,6 +817,7 @@ run_sequence(seq):
 run_step_list(steps):
   for each step:
     if should_stop: return
+    if paused: hold (pump_sleep) until Resume/Stop, unlocking manual START/GOTO
     dispatch step -> handler
       GOTO    -> resolve star; sync dropdowns; if standalone skip; else slew(headless)
       MEASURE -> take_reading(inherit UI); obs_count++
@@ -826,6 +826,27 @@ run_step_list(steps):
       REPEAT  -> find END; loop body (nested stop check)
       ABORT_IF-> evaluate alt/airmass; set abort
 ```
+
+### 7.7 TARGET steps & missing-object handling
+
+The `TARGET` step loads a catalog object (by name or AUID) into
+`current_target` via `_apply_target` — the same code path as
+`Catalog → Select Target Star`, extracted from `_on_select_star` so the manual
+dialog and the sequence share it. After a `TARGET` step, the following
+`GOTO V/C/K`, the `MEASURE`/`SKY` defaults and `ABORT_IF` all use the new
+triple.
+
+Resolution (`ssp_sequence.resolve_catalog_target`) matches the **name** first,
+then the **AUID**, unless `id_type` (`name` / `auid`) forces one field. Missing
+objects are handled in three places:
+
+| When | Behaviour |
+|---|---|
+| Adding / editing a `TARGET` step | `SequenceDialog._check_one_target` pops up a warning when the entered object is not in the catalog (silent when it resolves). |
+| Opening the editor / loading a sequence in it | `SequenceDialog._check_targets` shows a **non-blocking** warning listing every unknown object; the run is not blocked. |
+| Loading a sequence file / template (main window) | `_warn_missing_targets` shows a **non-blocking** warning listing the unknown objects. |
+| Pressing **Run Sequence** | `_preflight_sequence_targets` shows `CountdownWarningDialog` with a **10-second countdown**. Nothing runs during the countdown; it auto-proceeds (returns True) at zero, or the user cancels (returns False) to abort. If every object is present, no dialog is shown and the run starts immediately. |
+| During the run | `_step_target` **silently skips** an unresolved `TARGET` step (`_update_status`, no exception, no abort), mirroring a missing Check star on `GOTO K`. |
 
 ---
 
@@ -1112,9 +1133,9 @@ observable (R4).
 Work is split into five phases. Each phase is independently shippable and has
 explicit acceptance criteria. Phases 1-2 deliver the core value; 3-4 polish.
 
-**Progress:** Phase 0 (decisions), Phase 1 (core refactor), Phase 2 (sequence
-engine + minimal UI) and Phase 3 (builder dialog + named persistence) are
-implemented. Phase 4 (polish/docs/release) remains.
+**Progress:** All phases implemented — Phase 0 (decisions), Phase 1 (core
+refactor), Phase 2 (sequence engine + minimal UI), Phase 3 (builder dialog +
+named persistence) and Phase 4 (docs, version bump to v0.2.0, release manifest).
 
 ### Phase 0 — Spikes and decisions (0.5 day)
 
@@ -1169,7 +1190,7 @@ honour Plate Solve and Sync; standalone mode skips GOTO and still measures.
 *Acceptance:* sequences can be created/edited/saved without hand-writing text;
 templates load; the dialog respects night mode.
 
-### Phase 4 — Polish (1-2 days)
+### Phase 4 — Polish (1-2 days) ✅ Implemented
 
 | Task | Detail |
 |---|---|
@@ -1249,12 +1270,12 @@ exercised without waiting.
 | R3 | A pumped wait delivering a click/close mid-run | `_sequence_running` + `_sequence_abort` + `_closing` guards (NFR-2). |
 | R4 | Long unattended runs and memory | Reuses pumped waits; keeps memory instrumentation active (§13.7). |
 | R5 | Modal dialogs from the GOTO path | `headless` flag (§9.1, §13.3). |
-| R6 | Plate-solve every GOTO is slow | Gated by `plate_solve_sync`; per-step override is a future item. |
+| R6 | Plate-solve every GOTO is slow | **Resolved:** gated by `plate_solve_sync`, plus a per-step `plate_solve=0/1` override on GOTO/SKY steps (§3.2). |
 | R7 | `ssp_dataaq.py` is already ~165 kB / 3000+ lines | Model/parsers live in `ssp_sequence.py`; only executor entry points added to the window. |
 | R8 | `WAIT_UNTIL` scheduled window already passed | Absolute UTC date/time; ≤ 30 min late → proceed with a warning; > 30 min late → stop the run with a warning. No midnight/DST ambiguity (all UTC). |
 | Q1 | `WAIT_UNTIL` semantics | **Decided:** absolute UTC date/time; ≤ 30 min late → proceed with a warning; > 30 min late → stop the run with a warning. |
 | Q2 | Auto-save the `.raw` file at the end of a run? | Deferred to Phase 4; reuse `_save_raw_file` behind a "save at end" flag. |
-| Q3 | Per-step override of Plate Solve and Sync? | Future; the global option is used in Phase 2. |
+| Q3 | Per-step override of Plate Solve and Sync? | **Decided:** yes — an optional `plate_solve=0/1` param on GOTO/SKY steps; absent means the global option applies. |
 
 ---
 
@@ -1273,14 +1294,21 @@ New methods on `SSPDataAcquisitionWindow` (`ssp_dataaq.py`):
 | `run_sequence(sequence)` | Execute a `PEPSequence` (entry point). |
 | `_run_step_list(steps, sequence)` | Dispatch steps (handles `REPEAT`). |
 | `_sequence_should_stop(sequence)` | Minutes / observations / abort / comm check. |
-| `_resolve_step_star(step)` | Map `V/C/K/SKY/OFFSET` to a `StarData` + label. |
-| `_make_offset_star(d_ra_h, d_dec_deg, name)` | Build an offset pseudo-star. |
+| `_resolve_step_star(step)` | Map `V/C/K/SKY/OFFSET` (or `ra`/`dec`) **plus** an optional RA/Dec offset to a `StarData` + label. |
+| `_offset_star(base, d_ra_h, d_dec_deg, name)` | Build a pseudo-star offset from an arbitrary base star. |
+| `_make_offset_star(d_ra_h, d_dec_deg, name)` | Build an offset pseudo-star from the current target's variable star. |
 | `_make_star_from_radec(ra, dec, name)` | Build a pseudo-star from absolute RA/Dec. |
-| `_step_goto/_step_measure/_step_sky/_step_filter/_step_wait/_step_wait_until/_step_abort_if` | Step handlers. |
+| `_step_goto/_step_target/_step_measure/_step_sky/_step_filter/_step_wait/_step_wait_until/_step_abort_if` | Step handlers. |
+| `_apply_target(target)` | Load a Var/Comp/Check triple (extracted from `_on_select_star`); shared by the manual dialog and the `TARGET` step. |
+| `_sequence_target_issues(seq)` | Classify a sequence's `TARGET` objects: `ok` / `missing` (a missing/empty catalog reports every `TARGET` step as missing). |
+| `_warn_missing_targets(seq, context)` | Non-blocking warning when a loaded sequence references unknown `TARGET` objects. |
+| `_preflight_sequence_targets(seq)` | Run-start check; shows the 10 s `CountdownWarningDialog` when objects are missing (returns False if cancelled). |
 | `_parse_utc_datetime(text)` | Parse a `YYYY-MM-DD HH:MM:SS` UTC string for `WAIT_UNTIL`. |
 | `_current_alt_airmass(star)` | Returns `(has_location, alt, airmass)` via `ssp_extinction.AirmassCalculator` for `ABORT_IF`. |
 | `_update_step_status(sequence, step)` | Progress line. |
-| `_set_sequence_controls_running(running)` | Enable/disable START/GOTO/RUN; toggle STOP. |
+| `_set_sequence_controls_running(running)` | Enable/disable START/GOTO/RUN; toggle STOP/PAUSE (manual START/GOTO re-enabled while paused). |
+| `_on_pause_sequence` / `_update_pause_controls` | Toggle Pause/Resume; update the PAUSE/RESUME button + menu text. |
+| `_sequence_wait_if_paused()` | Hold between steps while paused (pumping the UI); returns False if the run should end. |
 | `_on_run_sequence`, `_on_stop_sequence` | UI handlers. |
 | `_slew_to_star(star, star_type, headless=False)` | Existing method, new keyword. |
 
@@ -1294,6 +1322,16 @@ New module `ssp_sequence.py`:
 | `load_ssp_text(path)` / `save_ssp_text(seq, path)` | `.ssp`-style text I/O. |
 | `load_json(path)` / `save_json(seq, path)` | JSON I/O. |
 | `build_templates()` | FR-12 built-in templates. |
+| `find_target_steps(seq)` | List the `(index, identifier, id_type)` of every `TARGET` step. |
+| `resolve_catalog_target(catalog, identifier, id_type)` | Resolve a name/AUID to a `TargetTriple` (or None). |
+| `missing_catalog_targets(seq, catalog)` | `[(index, identifier)]` of `TARGET` objects not in the catalog; `None` when no catalog is loaded. |
+
+New UI `ssp_dialogs.py`:
+
+| Symbol | Purpose |
+|---|---|
+| `SequenceDialog(catalog=...)` | The sequence editor receives the live catalog; `_check_one_target` warns (popup) when a `TARGET` step is added/updated with an unknown object, and `_check_targets` warns (non-blocking) on open/load. |
+| `CountdownWarningDialog(message, seconds=10, details=...)` | Modal warning used by the run pre-flight; auto-`OK` at zero, `Cancel` aborts. |
 
 ### 17.2 `.ssp`-style command reference (extended)
 
@@ -1303,7 +1341,13 @@ New module `ssp_sequence.py`:
 | `MAXOBS` | count | Run-length limit (FR-2). |
 | `REPEAT` / `END` | count | Repeat block. |
 | `GOTO` | `V`/`C`/`K`/`SKY` | Slew to a target star. |
+| `GOTO` | `V, offset=dRA,dDec` | Slew to the V/C/K star **plus** an RA/Dec offset (`dRA` hours, `dDec` degrees). |
+| `GOTO` | `offset=dRA,dDec` | Slew to an offset from the target's variable star. |
 | `GOTO` | `RA,Dec` | Slew to absolute coordinates. |
+| `GOTO` | `RA,Dec, offset=dRA,dDec` | Slew to absolute coordinates plus an RA/Dec offset. |
+| `GOTO` / `SKY` | `plate_solve=0` / `plate_solve=1` | Per-step override of the global "Plate Solve and Sync" option (`0` = skip the solve for a fast offset/sky slew). |
+| `TARGET` | object name (e.g. `OMI CET`) | Load that catalog object and its Var/Comp/Check triple as the current target. |
+| `TARGET` | `auid=000-BBW-425` / `name=...` | Load by AUID (or force the name field). Optional `, id=auid` forces the match field explicitly. |
 | `MEASURE` | `filter=,gain=,integ=,interval=` | One measurement. |
 | `SKY` | `label=,offset=ra,dec` | Sky reading (optional offset). |
 | `FILTER` | filter name | Change filter (auto mode). |
@@ -1351,6 +1395,15 @@ backward compatibility where they map cleanly (`COUNT` → `MEASURE`, `PAUSE` �
 | 2026-11-26 | Phase 1 implemented: `take_reading` / `_collect_counts` / `_filter_position_for_name` extracted from `_on_start`; `ssp_dataaq.py`; `test_sequence.py` added. |
 | 2026-11-26 | Phase 2 implemented: `ssp_sequence.py` (model, `.ssp`-text + JSON I/O, templates); executor + step handlers + `headless` GOTO in `ssp_dataaq.py`; `ssp_config.py` sequence keys; Sequence menu and RUN/STOP buttons; `test_sequence.py` tests 4-13. |
 | 2026-11-26 | Phase 3 implemented: `ssp_sequence.py` editor helpers (`format_step`, `step_from_fields`, `fields_from_step`) and named storage (`sequences_dir`, `save_named`, `load_named`, `list_names`, `delete_named`); `SequenceDialog` in `ssp_dialogs.py`; `Sequence → Edit Sequence…` wiring + last-sequence/run-length persistence in `ssp_dataaq.py`; `test_sequence.py` tests 13-14. |
+| 2026-11-26 | Phase 4 implemented: gain coerced to int in `take_reading` + headless measurements in the executor (bug fixes); docs updated (README, QUICK_START, DEVELOPMENT_NOTES); version bumped to **v0.2.0** (main.py, module headers, release script); `create_release_zip.ps1` now includes `ssp_sequence.py`, `test_sequence.py` and `SEQUENCER_DEVELOPMENT.md`. |
+| 2026-11-26 | Per-step `plate_solve=0/1` override added to GOTO/SKY steps (resolves R6/Q3): `_slew_to_star` / `_solve_and_sync_mount` gained a `plate_solve` kwarg, the `.ssp` parser/serializer and editor fields round-trip it, and `test_sequence.py` / `test_goto.py` cover it. |
+| 2026-11-28 | `TARGET` step added (mid-run catalog object switch, by name or AUID): parser/serializer/editor round-trip, `_apply_target` extracted from `_on_select_star`, `_step_target` executor handler, and shared `find_target_steps` / `resolve_catalog_target` / `missing_catalog_targets` helpers. Missing objects warn when a `TARGET` step is added/edited in the editor, on load, and at run start (10 s `CountdownWarningDialog`, cancel to abort) and are skipped silently at run time. Editor help box now shows per-command syntax + "what it does". |
+| 2026-11-28 | RA/Dec coordinates and offsets are formatted with a fixed 6-decimal precision (`ssp_sequence._fmt_coord`) in the editor fields, the step list and the `.ssp` export, so the full binary float expansion (e.g. `0.10000000000000001`) is no longer shown. |
+| 2026-11-28 | GOTO combines **Value** and an **offset** (star/coords + offset). Offset syntax is now **unified across commands**: `offset=dRA,dDec` for both GOTO and SKY, in the editor Params box and the `.ssp` text (legacy `GOTO, OFFSET,dRA,dDec` / `GOTO, V,dRA,dDec` still parse but are normalised to `offset=`). `_resolve_step_star` applies the offset on top of the resolved star via the new `_offset_star`. |
+| 2026-11-28 | Fixed: the editor **Save As** appeared to do nothing. `SequenceDialog._refresh_sequence_list` called `ComboBox.Items.Clear()`, which resets the edit text, blanking the Sequence box on open; `_on_save` then hit its empty-name early return. It now preserves/restores the box text (the same pattern used for `filter_combo`), falls back to the sequence's own name, and shows a clear prompt instead of returning silently. |
+| 2026-11-28 | Fixed: changing the editor **Kind** now clears the Value/Label/Params boxes, so values from the previous command no longer persist (and no longer sit greyed-out in a now-disabled box). `_on_kind_changed` clears them only on a real kind change; `_populate_fields` records the kind (`_last_kind`) so selecting a step does not wipe the fields it just filled. |
+| 2026-11-28 | Added **`Sequence → Load Sequence…`** (`_on_load_sequence` / `_load_sequence_by_name`) with a `SequencePickerDialog` listing saved sequences (and built-in templates); the chosen sequence becomes the current one, ready for **RUN SEQ**. |
+| 2026-11-28 | Added **PAUSE / RESUME** (`_on_pause_sequence` / `_sequence_wait_if_paused`): the button (and `Sequence → Pause Sequence`) toggles, the current step completes first, then the run holds between steps with the UI pumping. While paused the manual START/GOTO buttons are re-enabled (`_set_sequence_controls_running`) so SharpCap and the SSP interface stay usable; STOP ends the run. |
 
 
 

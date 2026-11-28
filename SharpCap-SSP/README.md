@@ -6,11 +6,11 @@ SharpCap-SSP is a Python-based tool for integrating Optec SSP photometers with S
 
 ## 📥 Quick Download
 
-**Latest Release: v0.1.6**
+**Latest Release: v0.2.0**
 
-https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.6 
+https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.2.0 
 
-### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.1.6.zip)
+### [**Download SharpCap-SSP (ZIP)**](https://github.com/labstercam/pep-ssp-tools/releases/latest/download/SharpCap-SSP-v0.2.0.zip)
 
 *Non-experts: Just download the ZIP, extract it, and follow the `QUICK_INSTALL.txt` file inside.*
 
@@ -20,7 +20,7 @@ https://github.com/labstercam/pep-ssp-tools/releases/tag/v0.1.6
 
 This tool replicates the core data collection functionality of the original SSPDataq software, enabling serial communication and photometer control directly within the SharpCap environment or standalone.
 
-## Status: Version 0.1.6 - Memory Leak Fix for Long Sessions
+## Status: Version 0.2.0 - Automated Sequence Runs
 
 ✅ **Serial communication implemented and tested**
 ✅ **Data collection working (slow mode + trial mode)**
@@ -100,12 +100,38 @@ See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for technical details
 - ✅ **Optimization verification tools**
   - `verify_optimization.py` - Validates memory optimizations
   - `test_memory_optimization.py` - Diagnoses memory issues
+- ✅ **Automated Sequence Runs** ⭐
+  - Build/run a configurable sequence of steps: GOTO (Var/Comp/Check/coords),
+    TARGET (switch catalog object mid-run, by name or AUID), MEASURE,
+    SKY (optional RA/Dec offset), FILTER, WAIT, WAIT_UNTIL (absolute UTC),
+    ABORT_IF (altitude/airmass), REPEAT
+  - One **`offset=dRA,dDec`** syntax for GOTO and SKY, applied **on top of** the
+    target star/coords (e.g. `GOTO, V, offset=0,0.05`)
+  - Run length by **minutes** or **number of observations**; STOP aborts cleanly
+  - **PAUSE / RESUME** the run between steps (the current step completes first);
+    while paused the manual SSP controls (GOTO, filter, integration, START, …) are
+    unlocked so SharpCap stays usable
+  - Editor dialog (`Sequence → Edit Sequence…`): add/reorder steps, a per-command
+    syntax/help panel, save/load named sequences (**Save As**), and built-in
+    templates (V-C-V-C, C-V-C, V-C-K)
+  - **`Sequence → Load Sequence…`** picks a saved sequence (or template) to load
+    as the current sequence
+  - Unknown `TARGET` objects are warned about when added/edited and on load, and at
+    run start (a 10-second countdown you can cancel); at run time they are skipped
+    silently
+  - `.ssp`-style text and JSON formats; `Sequence → Export Sequence…`
+  - Headless GOTO (no modal dialogs mid-run); reuses the existing plate-solve
+    and memory-safe pumped waits
+  - See [SEQUENCER_DEVELOPMENT.md](SEQUENCER_DEVELOPMENT.md)
+- ✅ **Compulsory autosave** — every reading is silently appended (no prompts, never
+  blocks the run) to a per-target `.raw` + `.tab` pair named
+  `YYMMDD-HHMMSS-<target>.raw/.tab`
 
 ### Not Yet Implemented ⏸️
 - ⏸️ **Fast Mode**: 100-5000 rapid readings
 - ⏸️ **Very Fast Mode**: Ultra-rapid 20ms integrations (SSP-5 only)
 - ⏸️ Catalog loading from additional catalog files
-- ⏸️ Script automation (.ssp files)
+- ⏸️ Full multi-target **queue editor** (a single mid-run object switch via `TARGET` *is* supported)
 - ⏸️ Advanced telescope integration features
 - ⏸️ Data reduction/magnitude calculation
 
@@ -334,6 +360,7 @@ SharpCap-SSP/
 ├── DEVELOPMENT_NOTES.md   - Developer notes, patterns and threading rules
 ├── MEMORY_ANALYSIS.md     - Memory / OutOfMemoryException investigation record
 ├── DOCKING.md             - Docked-window implementation guide
+├── SEQUENCER_DEVELOPMENT.md - Automated sequence runs (design + phases)
 ├── RELEASE_INSTRUCTIONS.md
 ├── create_release_zip.ps1
 ├── tools/
@@ -344,7 +371,8 @@ SharpCap-SSP/
     ├── ssp_comm.py           - Serial communication + UI message pump
     ├── ssp_config.py         - JSON configuration
     ├── ssp_catalog.py        - Star catalog
-    ├── ssp_dialogs.py        - Utility dialogs
+    ├── ssp_dialogs.py        - Utility dialogs (incl. SequenceDialog editor)
+    ├── ssp_sequence.py       - Sequence model, .ssp/JSON I/O, templates
     ├── ssp_extinction.py     - Extinction calculations
     ├── ssp_allsky.py         - All Sky calibration
     ├── ssp_location_utils.py - Observer location, Alt/Az, airmass
@@ -355,7 +383,7 @@ SharpCap-SSP/
 
 ## Development Status
 
-**Current Version**: 0.1.6
+**Current Version**: 0.2.0
 
 - [x] Project structure and UI framework
 - [x] Serial communication (SSP-3a / SSP-5a)
@@ -368,6 +396,7 @@ SharpCap-SSP/
 - [x] All Sky calibration (extinction coefficients)
 - [x] Night mode
 - [x] Memory leak fix for long sessions with a guide camera running
+- [x] Automated sequence runs (GOTO/measure/sky/target, run-length, editor)
 - [ ] Fast mode
 - [ ] Very fast mode
 

@@ -6,7 +6,7 @@ Utilities for looking up location names and elevation from coordinates.
 Uses free online services (Nominatim and Open-Elevation APIs).
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr

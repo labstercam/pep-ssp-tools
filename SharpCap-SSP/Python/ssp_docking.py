@@ -9,7 +9,7 @@ Usage:
     show_docked_data_acquisition_window(sharpcap=SharpCap, ...)
 
 Author: pep-ssp-tools project
-Version: 0.1.6
+Version: 0.2.0
 """
 
 import clr
